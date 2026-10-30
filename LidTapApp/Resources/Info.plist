@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key><string>LidTap</string>
+    <key>CFBundleDisplayName</key><string>LidTap</string>
+    <key>CFBundleIdentifier</key><string>dev.lidtap.LidTap</string>
+    <key>CFBundleExecutable</key><string>LidTap</string>
+    <key>CFBundleIconFile</key><string>AppIcon</string>
+    <key>CFBundlePackageType</key><string>APPL</string>
+    <key>CFBundleShortVersionString</key><string>1.0</string>
+    <key>CFBundleVersion</key><string>1</string>
+    <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>LSUIElement</key><true/>
+    <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+    <key>NSHighResolutionCapable</key><true/>
+    <key>NSAppleEventsUsageDescription</key><string>LidTap brings your Google Meet tab to the front so Privacy Guard can turn your camera off.</string>
+    <key>NSHumanReadableCopyright</key><string>Zone taps from your MacBook's motion sensor.</string>
+</dict>
+</plist>

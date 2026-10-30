@@ -1,0 +1,10 @@
+.DS_Store
+.venv/
+__pycache__/
+*.pyc
+.claude/
+# Your own recorded taps (the prototype's data folder)
+data/
+# Build output and generated toolchain workaround
+LidTapApp/build/
+LidTapApp/scripts/toolchain-fix/

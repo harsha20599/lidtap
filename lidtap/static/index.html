@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="token" content="{{TOKEN}}">
+<title>LidTap</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<header>
+  <div class="brand">LidTap <span>zone taps from the hinge gyro</span></div>
+  <div class="pills" id="pills">
+    <span class="pill" id="pSensors">Sensors …</span>
+    <span class="pill" id="pLid">Lid –</span>
+    <span class="pill" id="pNoise">Noise –</span>
+    <span class="pill" id="pThr">Trigger –</span>
+    <span class="pill" id="pMode">Idle</span>
+    <span class="pill" id="pModel">No model</span>
+  </div>
+</header>
+<nav id="tabs">
+  <button data-tab="monitor" class="on">1 · Monitor</button>
+  <button data-tab="calibrate">2 · Calibrate</button>
+  <button data-tab="model">3 · Model</button>
+  <button data-tab="live">4 · Live</button>
+</nav>
+<div id="banner" class="banner" hidden></div>
+
+<main>
+<!-- MONITOR -->
+<section id="monitor" class="tab on">
+  <div class="cols">
+    <div class="card grow">
+      <div class="card-h"><h2>Live signals</h2>
+        <div class="tools">
+          <label>Window <select id="scopeWin"><option>2</option><option selected>4</option><option>8</option></select> s</label>
+          <button id="pauseBtn" class="ghost">Pause</button>
+        </div>
+      </div>
+      <canvas id="scope" class="scope"></canvas>
+      <div class="legend"><i class="lx"></i>x <i class="ly"></i>y <i class="lz"></i>z <i class="lm"></i>twist |ω| <i class="lt"></i>trigger
+        <span class="sep"></span><i class="mk m-pred"></i>predicted <i class="mk m-rec"></i>recorded <i class="mk m-rej"></i>rejected <i class="mk m-gate"></i>ignored</div>
+    </div>
+    <div class="card side">
+      <h2>Detector</h2>
+      <p class="hint">A tap fires when the high-passed gyro twist goes over the trigger line: <b>sensitivity × idle noise</b>, never below the floor.</p>
+      <div class="slider"><label>Sensitivity ×<b id="vK"></b></label><input type="range" id="k" min="2" max="15" step="0.5"></div>
+      <div class="slider"><label>Trigger floor <b id="vMin"></b> °/s</label><input type="range" id="min_thresh" min="0.3" max="20" step="0.1"></div>
+      <div class="slider"><label>Dead time <b id="vRef"></b> s</label><input type="range" id="refractory" min="0.15" max="1" step="0.05"></div>
+      <div class="slider"><label>Ignore after typing/clicks <b id="vGate"></b> s</label><input type="range" id="gate_s" min="0" max="1" step="0.05"></div>
+      <label class="check"><input type="checkbox" id="gating"> Ignore taps during keyboard, trackpad or lid movement</label>
+      <p class="hint">Tap the screen <b>gently with a fingertip pad</b> (or the lid back). Never press hard. A light knuckle tap near the top or side edges is the safer fallback.</p>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="card grow">
+      <div class="card-h"><h2>Last tap</h2><span id="tapWhen" class="muted"></span></div>
+      <div class="tapview">
+        <canvas id="tapWave" class="tapwave"></canvas>
+        <dl id="tapInfo" class="kv"></dl>
+      </div>
+    </div>
+    <div class="card side">
+      <h2>Tap log</h2>
+      <ol id="log" class="log"></ol>
+    </div>
+  </div>
+</section>
+
+<!-- CALIBRATE -->
+<section id="calibrate" class="tab">
+  <div class="cols">
+    <div class="card side">
+      <h2>Calibration</h2>
+      <div class="form">
+        <label>Rows <input type="number" id="cRows" min="1" max="6" value="3"></label>
+        <label>Columns <input type="number" id="cCols" min="1" max="6" value="3"></label>
+        <label>Taps per zone <input type="number" id="cPer" min="1" max="200" value="15"></label>
+        <label>Taps in a row <input type="number" id="cBlock" min="1" max="50" value="5"></label>
+      </div>
+      <div class="btns">
+        <button id="calStart" class="primary">Start calibration</button>
+        <button id="calStop">Stop</button>
+      </div>
+      <p class="hint">Zones are visited in shuffled blocks so drift spreads evenly. Calibration resumes where you left off; the model retrains when it finishes.</p>
+      <h3>Not-a-tap examples</h3>
+      <p class="hint">Record 30 s of things that should <b>not</b> count: desk knocks, adjusting the lid, picking the laptop up. They become a “noise” class the model learns to reject.</p>
+      <div class="btns">
+        <button id="negStart">Record 30 s of noise</button>
+      </div>
+      <h3>Dataset</h3>
+      <table id="dsTable" class="ds"></table>
+      <div class="btns">
+        <button id="undoBtn">Undo last tap</button>
+        <button id="clearBtn" class="danger">Clear all</button>
+      </div>
+    </div>
+    <div class="card grow">
+      <div class="card-h"><h2 id="calTitle">Zone grid</h2>
+        <div class="tools"><button id="calFull" class="ghost">Full screen ⤢</button></div>
+      </div>
+      <div class="gridwrap" id="calWrap">
+        <div class="zgrid" id="calGrid"></div>
+        <div class="gridmsg" id="calMsg">Press <b>Start calibration</b>, then tap the highlighted zone.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- MODEL -->
+<section id="model" class="tab">
+  <div class="cols">
+    <div class="card grow">
+      <div class="card-h"><h2>Cross-validated accuracy</h2>
+        <div class="tools">
+          <label>Use <select id="modelKind"></select></label>
+          <button id="trainBtn" class="primary">Retrain</button>
+        </div>
+      </div>
+      <p class="hint">Each tap is scored by a model that never saw it (stratified k-fold). Merged layouts show what you'd get if neighbouring zones were combined; pick the finest layout that is reliably high.</p>
+      <div class="tablewrap"><table id="accTable" class="acc"></table></div>
+      <div class="slider narrow"><label>Reject taps that are <b id="vRej"></b>× farther than usual from their zone</label><input type="range" id="reject_factor" min="1" max="5" step="0.1"></div>
+    </div>
+    <div class="card side">
+      <h2>Learning curve</h2>
+      <p class="hint">Accuracy vs taps per zone used for training (rest held out).</p>
+      <canvas id="learn" class="small"></canvas>
+    </div>
+  </div>
+  <div class="cols">
+    <div class="card">
+      <h2>Confusion matrix</h2>
+      <p class="hint">Rows: zone you tapped. Columns: zone predicted. Off-diagonal heat = zones the sensor can't tell apart.</p>
+      <div id="confusion"></div>
+    </div>
+    <div class="card grow">
+      <h2>Feature map</h2>
+      <p class="hint">Every recorded tap projected to 2-D (PCA). Tight, separate clouds mean separable zones.</p>
+      <canvas id="pca" class="pca"></canvas>
+      <div id="pcaLegend" class="legend"></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Zone signatures</h2>
+    <p class="hint">Average strength-normalised gyro twist per zone (x, y, z). Physics predicts left vs right flips the sign of one axis, top vs bottom changes the ratios.</p>
+    <div id="sigs" class="sigs"></div>
+  </div>
+</section>
+
+<!-- LIVE -->
+<section id="live" class="tab">
+  <div class="cols">
+    <div class="card grow">
+      <div class="card-h"><h2>Live zones</h2>
+        <div class="tools"><button id="liveFull" class="ghost">Full screen ⤢</button></div>
+      </div>
+      <div class="gridwrap" id="liveWrap">
+        <div class="zgrid" id="liveGrid"></div>
+        <div class="gridmsg" id="liveMsg">Tap a zone.</div>
+      </div>
+    </div>
+    <div class="card side">
+      <h2>Actions</h2>
+      <label class="check"><input type="checkbox" id="actionsOn"> Run the zone's command on each accepted tap</label>
+      <p class="hint">Commands run in your shell. <code>{zone}</code> becomes the zone number. Examples: <code>say {zone}</code>, <code>open -a "Mission Control"</code>, <code>open -g "hammerspoon://zone?n={zone}"</code>, <code>open -g "btt://trigger_named/?trigger_name=zone{zone}"</code>.</p>
+      <div id="actionList" class="actions"></div>
+      <button id="saveActions" class="primary">Save actions</button>
+      <h3>Recent</h3>
+      <ol id="liveLog" class="log"></ol>
+    </div>
+  </div>
+</section>
+</main>
+<script src="/static/app.js"></script>
+</body>
+</html>

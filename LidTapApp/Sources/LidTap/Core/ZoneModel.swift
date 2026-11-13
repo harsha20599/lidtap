@@ -4,9 +4,20 @@ struct Grid: Codable, Equatable, Hashable {
     var rows: Int
     var cols: Int
     var count: Int { rows * cols }
-    var title: String { "\(rows)×\(cols)" }
+    var title: String { self == .leftRight ? "Left / Right" : "\(rows)×\(cols)" }
 
-    static let presets = [Grid(rows: 2, cols: 2), Grid(rows: 2, cols: 3), Grid(rows: 3, cols: 3)]
+    /// Two zones, the left and the right half of the display. Which side was tapped is the easiest thing to read:
+    /// on a 14" MacBook Pro, where a tap barely twists the base, four corners were told apart 78% of the time
+    /// and the two sides 92%.
+    static let leftRight = Grid(rows: 1, cols: 2)
+    static let presets = [leftRight, Grid(rows: 2, cols: 2), Grid(rows: 2, cols: 3), Grid(rows: 3, cols: 3)]
+
+    /// Which half of the display a zone lies in: 0 left, 1 right, nil for the middle column of an odd grid.
+    func half(ofZone z: Int) -> Int? {
+        let c = z % cols
+        if cols % 2 == 1 && c == cols / 2 { return nil }
+        return c < cols / 2 ? 0 : 1
+    }
 }
 
 func zoneLabel(_ i: Int) -> String { "z\(i)" }
@@ -118,10 +129,18 @@ struct ModelReport: Equatable {
     func accuracy(_ kind: ModelKind, _ layout: String = Layouts.full) -> Double? {
         scores.first { $0.kind == kind }?.accuracy[layout]
     }
+
+    /// How often the two sides alone would be read correctly, when that is clearly better than this grid:
+    /// the grid is under 85%, and left/right is at least 85% and 7 points ahead. Nil otherwise.
+    func leftRightGain(_ kind: ModelKind) -> Double? {
+        guard grid != .leftRight, let full = accuracy(kind), let sides = accuracy(kind, Layouts.leftRight) else { return nil }
+        return full < 0.85 && sides >= 0.85 && sides - full >= 0.07 ? sides : nil
+    }
 }
 
 enum Layouts {
     static let full = "Full grid"
+    static let leftRight = "Left / right"
 
     /// Coarser layouts a grid can be merged into: name -> label mapper (nil drops the sample).
     static func all(for grid: Grid) -> [(String, (String) -> String?)] {
@@ -132,7 +151,7 @@ enum Layouts {
         func half(_ n: Int, _ i: Int) -> Int? { (n % 2 == 1 && i == n / 2) ? nil : (Double(i) >= Double(n) / 2 ? 1 : 0) }
         var out: [(String, (String) -> String?)] = [(full, { $0 })]
         if cols >= 3 { out.append(("Columns", by { _, c in "col\(c)" })) }
-        if cols >= 2 { out.append(("Left / right", by { _, c in half(cols, c).map { $0 == 0 ? "L" : "R" } })) }
+        if cols >= 2, grid != .leftRight { out.append((leftRight, by { _, c in half(cols, c).map { $0 == 0 ? "L" : "R" } })) }
         if rows >= 3 { out.append(("Rows", by { r, _ in "row\(r)" })) }
         if rows >= 2 { out.append(("Top / bottom", by { r, _ in half(rows, r).map { $0 == 0 ? "T" : "B" } })) }
         if rows >= 2, cols >= 2, !(rows == 2 && cols == 2) {
@@ -191,8 +210,32 @@ enum Evaluator {
         return out
     }
 
+    /// Another recogniser has to beat logistic regression by this much to be used instead.
+    static let margin = 0.15
+
+    /// The recogniser to use. Cross-validation scores taps against others from the same sitting, which flatters
+    /// nearest neighbours: calibration taps come five in a row, and it remembers a sitting. On a 14" MacBook Pro
+    /// it scored 88% that way against logistic regression's 77%, then read 22 of 53 taps from another sitting
+    /// as the wrong zone against 12. So logistic regression, which draws one smooth boundary, is used unless
+    /// another is far better: the sign that a straight boundary can't separate these zones at all (ties among
+    /// the rest go to the earlier kind).
+    static func preferred(_ scores: [ModelScore]) -> ModelKind {
+        let full = { (s: ModelScore) in s.accuracy[Layouts.full] ?? -1 }
+        guard let top = scores.max(by: { full($0) < full($1) }) else { return .logreg }
+        guard let logreg = scores.first(where: { $0.kind == .logreg }) else { return top.kind }
+        return full(top) - full(logreg) >= margin ? top.kind : .logreg
+    }
+
     /// Cross-validated scores per model and layout. Augmented variants are only ever added to training folds.
-    static func evaluate(X: [[Double]], labels: [String], grid: Grid, augmented: [[[Double]]]? = nil) -> ModelReport {
+    static func evaluate(X: [[Double]], labels allLabels: [String], grid: Grid, augmented allAugmented: [[[Double]]]? = nil) -> ModelReport {
+        // A label with a single sample can't be both learned from and checked (one stray bump in the "not a tap"
+        // step is the usual case). Left in, it voided the whole check and the result read as 0% accurate.
+        // It still trains the recogniser; it just isn't scored.
+        var counts: [String: Int] = [:]
+        for l in allLabels { counts[l, default: 0] += 1 }
+        let scored = allLabels.indices.filter { counts[allLabels[$0]]! >= 2 }
+        let X = scored.map { X[$0] }, labels = scored.map { allLabels[$0] }
+        let augmented = allAugmented.map { aug in scored.map { aug[$0] } }
         let layouts = Layouts.all(for: grid)
         var scores: [ModelScore] = []
         var fullPreds: [ModelKind: [String]] = [:]
@@ -202,14 +245,16 @@ enum Evaluator {
                 let keep = labels.indices.filter { map(labels[$0]) != nil }
                 let mapped = keep.map { map(labels[$0])! }
                 if let p = crossValidate(kind, X: keep.map { X[$0] }, labels: mapped, augmented: augmented.map { aug in keep.map { aug[$0] } }) {
-                    acc[name] = Double(zip(p, mapped).filter { $0 == $1 }.count) / Double(mapped.count)
+                    // Scored on taps alone. "Not a tap" examples are in every fold and can win a tap, but being
+                    // easy to spot themselves they must not lift the figure the user reads as "taps in the right zone".
+                    let taps = mapped.indices.filter { mapped[$0] != noiseLabel }
+                    acc[name] = taps.isEmpty ? 0 : Double(taps.filter { p[$0] == mapped[$0] }.count) / Double(taps.count)
                     if name == Layouts.full { fullPreds[kind] = p }
                 }
             }
             scores.append(ModelScore(kind: kind, accuracy: acc))
         }
-        // Ties go to the earlier kind in ModelKind.allCases (logistic regression first).
-        let best = scores.max { ($0.accuracy[Layouts.full] ?? -1) < ($1.accuracy[Layouts.full] ?? -1) }?.kind ?? .logreg
+        let best = preferred(scores)
         let ordered = Array(Set(labels)).sorted { a, b in
             if (a == noiseLabel) != (b == noiseLabel) { return b == noiseLabel }
             return (zoneIndex(a) ?? 0) < (zoneIndex(b) ?? 0)
@@ -221,7 +266,7 @@ enum Evaluator {
             for (t, q) in zip(labels, p) { cm[idx[t]!][idx[q]!] += 1 }
             confusion = cm
         }
-        return ModelReport(sampleCount: labels.count, grid: grid, labels: ordered, layouts: layouts.map(\.0),
+        return ModelReport(sampleCount: allLabels.count, grid: grid, labels: ordered, layouts: layouts.map(\.0),
                            scores: scores, best: best, confusion: confusion,
                            learning: fullPreds[best] == nil ? [] : learningCurve(best, X: X, labels: labels, augmented: augmented),
                            trainedAt: Date())

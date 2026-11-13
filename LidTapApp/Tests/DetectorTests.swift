@@ -9,6 +9,8 @@ final class StreamSim {
     var lid = 120
     private var rng = SplitMix64(seed: 7)
     let gyroNoise: Double
+    /// Scales only the twist of injected taps, to play a tap as a heavier Mac feels it: far less twist, some jolt.
+    var twistScale = 1.0
 
     init(start: Double = 1000, gyroNoise: Double = 0.1, settings: DetectorSettings = { var s = DetectorSettings(); s.gating = false; return s }()) {
         t = start
@@ -25,7 +27,8 @@ final class StreamSim {
 
     /// Undoes the detector's 5 Hz high-pass so a recorded (already high-passed) window can be injected as raw
     /// sensor data: y[n] = a(y[n-1] + x[n] - x[n-1])  =>  x[n] = x[n-1] + y[n]/a - y[n-1].
-    /// After the window the offset ramps back to zero over 0.4 s (slow enough to stay below any trigger).
+    /// After the window the offset eases back to zero over 0.4 s (a raised cosine: slow and without a corner, so it
+    /// stays below both the twist and the jolt trigger).
     static func unHighPass(_ y: [[Double]]) -> [SIMD3<Double>] {
         let rc = 1 / (2 * Double.pi * 5.0), a = rc / (rc + 1 / TapDetector.fs)
         var x = SIMD3<Double>.zero, prev = SIMD3<Double>.zero
@@ -37,7 +40,7 @@ final class StreamSim {
             out.append(x)
         }
         let ramp = Int(0.4 * TapDetector.fs)
-        for i in 1...ramp { out.append(x * (1 - Double(i) / Double(ramp))) }
+        for i in 1...ramp { out.append(x * (0.5 + 0.5 * cos(Double.pi * Double(i) / Double(ramp)))) }
         return out
     }
 
@@ -53,7 +56,7 @@ final class StreamSim {
             for (j, tap) in taps.enumerated() {
                 let k = Int(((ti - start) - tap.at) * TapDetector.fs + 0.5) + TapDetector.trig
                 if k >= 0 && k < raw[j].0.count {
-                    g += raw[j].0[k] * tap.gain
+                    g += raw[j].0[k] * tap.gain * twistScale
                     a += raw[j].1[k] * tap.gain
                 }
             }
@@ -62,6 +65,40 @@ final class StreamSim {
         }
         t = start + Double(n) / TapDetector.fs
     }
+
+    /// Feeds a real recording, sample for sample at its own rate. Event times are then seconds into the recording.
+    func feed(_ stream: RawStream) {
+        t = 0
+        for i in stream.gyro.indices {
+            let ti = Double(i) / stream.rate
+            det.process(.accel, time: ti, value: stream.accel[i])
+            det.process(.gyro, time: ti + 0.0001, value: stream.gyro[i])
+        }
+        t = Double(stream.gyro.count) / stream.rate
+    }
+
+    /// Feeds raw gyro and accelerometer values produced by `motion` (seconds since the call -> deg/s, g) on top of the noise.
+    func feed(seconds: Double, motion: (Double) -> (SIMD3<Double>, SIMD3<Double>)) {
+        let n = Int(seconds * TapDetector.fs), start = t
+        for i in 0..<n {
+            let ti = start + Double(i) / TapDetector.fs
+            let (mg, ma) = motion(ti - start)
+            det.process(.accel, time: ti, value: SIMD3(gauss(), gauss(), gauss()) * 0.0003 + SIMD3(0, 0, -1) + ma)
+            det.process(.gyro, time: ti + 0.0001, value: SIMD3(gauss(), gauss(), gauss()) * gyroNoise + mg)
+        }
+        t = start + Double(n) / TapDetector.fs
+    }
+}
+
+/// The taps a detector finds in a real recording, labelled by the corner being tapped at the time.
+func labelledTaps(in stream: RawStream, settings: DetectorSettings = DetectorSettings()) -> (taps: [(label: String, event: TapEvent)], all: [TapEvent]) {
+    let sim = StreamSim(settings: settings)
+    sim.feed(stream)
+    var taps: [(String, TapEvent)] = []
+    for seg in stream.segments where zoneIndex(seg.name) != nil {
+        for e in sim.events where e.time >= seg.start && e.time < seg.end && e.gated == nil { taps.append((seg.name, e)) }
+    }
+    return (taps, sim.events)
 }
 
 private func correlation(_ a: [Double], _ b: [Double]) -> Double {
@@ -201,6 +238,113 @@ func detectorTests() {
         let moving = sim.events.last?.preMotion ?? -1
         T.note(String(format: "pre-tap motion: still %.2f °/s, after wobble %.2f °/s", still, moving))
         T.expect(still < 0.6 && moving > 0.6, "pre-motion did not separate a still start from a wobble")
+    }
+
+    T.run("a heavy Mac's light tap (hardly any twist, a clear jolt) is felt by its jolt") {
+        // Real taps replayed as a 14" MacBook Pro feels them: about 0.6 °/s of twist and 5 to 15 milli-g of jolt.
+        func felt(jolt: Bool) -> Int {
+            let sim = StreamSim()
+            sim.twistScale = 0.25
+            sim.det.impactTriggerEnabled = jolt
+            sim.feed(seconds: 2)
+            for s in ds.samples { sim.feed(seconds: 1, taps: [(0.3, s, 0.35)]) }
+            return sim.events.count
+        }
+        let both = felt(jolt: true), twistOnly = felt(jolt: false)
+        T.note("felt \(both) of \(ds.samples.count) with twist or jolt, \(twistOnly) with the twist alone")
+        T.expect(both >= ds.samples.count - 2 && both <= ds.samples.count, "felt \(both) of \(ds.samples.count)")
+        T.expect(twistOnly * 3 < both, "the twist alone felt \(twistOnly)")
+    }
+
+    // A real recording from a 14" MacBook Pro on a desk: 5 s still, light taps on each screen corner, typing, still.
+    // Its screen taps twist the base 0.3 to 1.5 °/s (a 13" Air: 5 to 10), mostly under a 1 °/s twist trigger.
+    T.run("14-inch MacBook Pro: light taps on every corner are felt, a still desk gives none") {
+        let pro = try T.loadStream()
+        let (taps, all) = labelledTaps(in: pro)
+        let perZone = (0..<4).map { z in taps.filter { $0.label == zoneLabel(z) }.count }
+        let still = ["still", "still2"].map { pro.segment($0) }
+        let stillEvents = all.filter { e in still.contains { e.time >= $0.start && e.time < $0.end } }.count
+        let twist = taps.map(\.event.peakG).sorted(), jolt = taps.map { $0.event.impact * 1000 }.sorted()
+        T.note("taps felt per corner \(perZone), in the still stretches \(stillEvents)")
+        T.note(String(format: "their twist: median %.2f °/s (%d of %d under 1 °/s) · their jolt: median %.1f mg", twist[twist.count / 2],
+                      twist.filter { $0 < 1 }.count, twist.count, jolt[jolt.count / 2]))
+        T.expect(perZone.allSatisfy { $0 >= 5 }, "taps felt per corner \(perZone), want at least 5 each")
+        T.expect(stillEvents == 0, "\(stillEvents) taps on a still desk")
+    }
+
+    T.run("14-inch MacBook Pro: the twist alone would miss most of its taps") {
+        // The trigger as it was: twist only.
+        let pro = try T.loadStream()
+        let sim = StreamSim()
+        sim.det.impactTriggerEnabled = false
+        sim.feed(pro)
+        let zones = pro.segments.filter { zoneIndex($0.name) != nil }
+        let found = sim.events.filter { e in zones.contains { e.time >= $0.start && e.time < $0.end } }.count
+        let (taps, _) = labelledTaps(in: pro)
+        T.note("twist only: \(found) taps · twist or jolt: \(taps.count)")
+        T.expect(found * 3 < taps.count, "twist-only trigger found \(found) of \(taps.count)")
+    }
+
+    T.run("resting level ignores a burst: a tap right after typing or a nudge is still felt") {
+        let sim = StreamSim()
+        sim.feed(seconds: 4)
+        let rest = sim.det.currentStatus()
+        // Two seconds of the Mac being moved about (3 Hz, 6 °/s), as when typing hard or shifting it on the desk.
+        sim.feed(seconds: 2) { t in (SIMD3(6 * sin(2 * .pi * 3 * t), 2 * sin(2 * .pi * 4.3 * t), 0), .zero) }
+        sim.feed(seconds: 0.6)
+        let after = sim.det.currentStatus()
+        T.note(String(format: "trigger at rest %.2f °/s, 0.6 s after the burst %.2f °/s", rest.threshold, after.threshold))
+        T.expect(after.threshold < 1.5 * rest.threshold, "trigger still raised after the burst: \(after.threshold) vs \(rest.threshold)")
+        sim.events.removeAll()
+        sim.feed(seconds: 1, taps: [(0.2, ds.samples[0], 0.4)])  // a light tap, 0.4x
+        T.expect(sim.events.count == 1, "a light tap 0.8 s after the burst gave \(sim.events.count) events")
+    }
+
+    T.run("resting level follows a surface that keeps moving") {
+        let sim = StreamSim(settings: DetectorSettings())  // gating on, as in the app
+        sim.feed(seconds: 3)
+        // A lap: slow sway that never stops.
+        sim.feed(seconds: 6) { t in (SIMD3(1.5 * sin(2 * .pi * 2.2 * t), 1.0 * sin(2 * .pi * 3.1 * t), 0), .zero) }
+        let st = sim.det.currentStatus()
+        T.note(String(format: "on a swaying surface: resting %.2f °/s, trigger %.2f °/s, events %d", st.noise, st.threshold, sim.events.count))
+        T.expect(st.noise > 0.5, "resting level did not rise on a moving surface: \(st.noise)")
+        T.expect(sim.events.filter { $0.gated == nil }.isEmpty, "sway alone gave \(sim.events.count) taps")
+        sim.events.removeAll()
+        sim.feed(seconds: 1, taps: [(0.3, ds.samples[0], 1)])
+        T.expect(sim.events.count == 1 && sim.events[0].gated == nil, "a tap on the swaying surface: \(sim.events.map { $0.gated ?? "tap" })")
+    }
+
+    T.run("a twist with no jolt is not a tap (the Mac being pushed or rocked)") {
+        let sim = StreamSim(settings: DetectorSettings())  // gating on
+        sim.feed(seconds: 3)
+        // A smooth 4 °/s push lasting 0.25 s: plenty of twist, nothing a fingertip landing would leave.
+        sim.feed(seconds: 1) { t in t < 0.25 ? (SIMD3(4 * sin(.pi * t / 0.25), 0, 0), .zero) : (.zero, .zero) }
+        T.note("push: \(sim.events.map { $0.gated ?? "tap" }) \(sim.events.first?.gateDetail ?? "")")
+        T.expect(!sim.events.isEmpty && sim.events.allSatisfy { $0.gated == TapDetector.notATap }, "a push was taken for a tap: \(sim.events.map { $0.gated ?? "tap" })")
+        sim.events.removeAll()
+        sim.feed(seconds: 1, taps: [(0.3, ds.samples[0], 1)])
+        T.expect(sim.events.count == 1 && sim.events[0].gated == nil, "a real tap after it: \(sim.events.map { $0.gated ?? "tap" })")
+    }
+
+    T.run("tap strength: the twist or the jolt, whichever this Mac shows more of") {
+        let air = ds.samples.filter { $0.label != noiseLabel }.map { TapStrength.strength(twist: $0.peakG, impact: TapStrength.impact($0.a)) }.sorted()
+        T.note(String(format: "13-inch Air taps: median strength %.1f", air[air.count / 2]))
+        T.expect(air.first! >= TapStrength.ceiling, "an Air tap of strength \(air.first!) would be refused")
+        if let pro = try? T.loadStream() {
+            let (taps, _) = labelledTaps(in: pro)
+            let heavy = taps.map(\.event.strength).sorted()
+            T.note(String(format: "14-inch Pro taps: median strength %.1f (twist alone %.1f)", heavy[heavy.count / 2], taps.map(\.event.peakG).sorted()[taps.count / 2]))
+            T.expect(heavy[heavy.count / 2] > 2, "the Pro's typical tap is only strength \(heavy[heavy.count / 2])")
+        }
+        // A 14" Pro's light tap: 0.7 deg/s of twist, 8 milli-g of jolt. The jolt decides.
+        T.expect(abs(TapStrength.strength(twist: 0.7, impact: 0.0084) - 2.8) < 1e-9, "a heavy Mac's tap should be measured by its jolt")
+        T.expect(TapStrength.impact(Array(repeating: [0, 0, -1], count: 160)) < 1e-9, "gravity alone read as a jolt")
+        // The limit follows the weakest corner, so a strong corner can't shut a weak one out.
+        let byZone = ["z0": [1.2, 1.5, 1.8, 1.4], "z2": [8.0, 9, 7.5, 10]]
+        T.expect(abs(TapStrength.learned(byZone: byZone) - 1.0) < 1e-9, "limit \(TapStrength.learned(byZone: byZone)) with one weak corner")
+        T.expect(TapStrength.learned(from: byZone.values.flatMap { $0 }) > 2, "the pooled limit should have been the unfair one")
+        T.expect(TapStrength.learned(byZone: ["z0": [3.0, 3.3, 2.7], "z1": [9, 9, 9]]) == 1.5, "half of the weakest corner's typical tap")
+        T.expect(TapStrength.learned(byZone: ["z0": [2.0], "z1": [2.2, 1.8]]) == TapStrength.learned(from: [2.0, 2.2, 1.8]), "too few taps per corner: all taps together")
     }
 
     T.run("scope snapshot is bounded and ordered") {

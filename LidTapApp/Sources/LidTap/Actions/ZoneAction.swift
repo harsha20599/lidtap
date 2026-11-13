@@ -130,6 +130,7 @@ struct ZoneAction: Codable, Equatable, Hashable {
     static func defaults(for grid: Grid) -> [String: ZoneAction] {
         let layout: [ActionKind]
         switch (grid.rows, grid.cols) {
+        case (1, 2): layout = [.desktopLeft, .desktopRight]
         case (2, 2): layout = [.desktopLeft, .desktopRight, .playPause, .privacyGuard]
         case (2, 3): layout = [.desktopLeft, .newNote, .desktopRight, .previousTrack, .playPause, .privacyGuard]
         case (3, 3): layout = [.desktopLeft, .newNote, .desktopRight, .previousTrack, .playPause, .nextTrack, .openApp, .none, .privacyGuard]

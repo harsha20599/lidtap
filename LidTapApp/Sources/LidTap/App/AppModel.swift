@@ -15,6 +15,9 @@ struct TapRecord: Identifiable, Equatable {
     let detail: String
     let peakG: Double
     let peakA: Double
+    /// Peak jolt in the impact band (g), and how hard the tap landed overall (twist or jolt, see `TapStrength`).
+    var impact: Double = 0
+    var strength: Double = 0
     let lid: Int?
     let gyro: [[Double]]
 
@@ -26,6 +29,9 @@ struct SensorStatus: Equatable {
     var lid: Int?
     var noise: Double = 0
     var threshold: Double = 0
+    /// Resting jolt and the jolt that triggers, in milli-g.
+    var impactNoise: Double = 0
+    var impactThreshold: Double = 0
     var error: String?
     var accessibility = false
 }
@@ -41,7 +47,7 @@ struct CalibrationState: Equatable {
     var phase: Phase = .taps
     var flash: Flash?
     var flashID = 0
-    /// Strength of the most recent tap during calibration (deg/s), for the coaching meter.
+    /// Strength of the most recent tap during calibration (see `TapStrength`), for the coaching meter.
     var lastStrength: Double?
     var strengthID = 0
     /// Samples this calibration counted toward the sequence, newest last (Undo removes these).
@@ -111,6 +117,7 @@ final class AppModel {
     @ObservationIgnored let store: Store
     @ObservationIgnored private var model: ZoneModel?
     @ObservationIgnored private var features: [Int: [Double]] = [:]  // sample id -> features
+    @ObservationIgnored private var strengths: [Int: Double] = [:]   // sample id -> tap strength
     @ObservationIgnored private var nextSampleID = 1
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var statusTimer: Timer?
@@ -197,6 +204,7 @@ final class AppModel {
     private func refreshStatus() {
         let d = detector.currentStatus()
         var s = SensorStatus(rate: d.gyroRate, lid: imu.lidAngle, noise: d.noise, threshold: d.threshold,
+                             impactNoise: d.impactNoise * 1000, impactThreshold: d.impactThreshold * 1000,
                              error: imu.error, accessibility: status.accessibility)
         s.accessibility = Permissions.accessibility
         if s.rate > 500 && status.rate <= 500 { Log.sensor.notice("Motion sensor streaming at \(Int(s.rate)) Hz, lid \(s.lid ?? -1)") }
@@ -215,14 +223,16 @@ final class AppModel {
         var info: [String: Any] = [
             "pid": ProcessInfo.processInfo.processIdentifier, "time": Date().timeIntervalSince1970,
             "rate": status.rate.rounded(), "lid": status.lid ?? -1, "noise": status.noise, "threshold": status.threshold,
+            "impactNoise": status.impactNoise, "impactThreshold": status.impactThreshold, "minTapStrength": minTapStrength,
             "accessibility": status.accessibility, "enabled": config.enabled, "trained": isTrained,
             "model": modelName, "accuracy": acc, "grid": grid.title,
             "samples": dataset.samples.count, "guardActive": privacyGuard.isActive,
-            "calibrating": calibration != nil, "taps": recent.count,
+            "calibrating": calibration != nil, "taps": recent.count, "learned": dataset.learnedCount, "seesKeys": input.seesKeys,
             "profile": config.activeProfile?.name ?? "", "profiles": config.profiles.count,
         ]
         info["recent"] = recent.prefix(10).map { ["id": $0.id, "outcome": "\($0.outcome)", "label": $0.label ?? "", "detail": $0.detail,
-                                                  "peak": ($0.peakG * 10).rounded() / 10] as [String: Any] }
+                                                  "peak": ($0.peakG * 10).rounded() / 10, "jolt": ($0.impact * 10000).rounded() / 10,
+                                                  "strength": ($0.strength * 10).rounded() / 10] as [String: Any] }
         if let r = lastRecord {
             info["last"] = ["id": r.id, "outcome": "\(r.outcome)", "label": r.label ?? "", "detail": r.detail,
                             "confidence": r.confidence ?? -1]
@@ -275,13 +285,21 @@ final class AppModel {
     // MARK: Taps
 
     func handle(_ event: TapEvent) {
-        tapFlash = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.tapFlash = false }
+        let impact = event.impact
+        let strength = TapStrength.strength(twist: event.peakG, impact: impact)
         func record(_ outcome: TapRecord.Outcome, _ label: String?, _ confidence: Double?, _ detail: String, gateDetail: String? = nil) {
             let why = gateDetail ?? event.gateDetail
-            Log.sensor.notice("Tap \(event.id): \(String(format: "%.1f", event.peakG), privacy: .public) °/s, \("\(outcome)", privacy: .public) \(label ?? "-", privacy: .public) \(detail, privacy: .public)\(why.map { " [" + $0 + "]" } ?? "", privacy: .public)")
-            recent.insert(TapRecord(id: event.id, date: event.date, outcome: outcome, label: label, confidence: confidence,
-                                    detail: detail, peakG: event.peakG, peakA: event.peakA, lid: event.lid, gyro: event.g), at: 0)
+            let entry = TapRecord(id: event.id, date: event.date, outcome: outcome, label: label, confidence: confidence,
+                                  detail: detail, peakG: event.peakG, peakA: event.peakA, impact: impact, strength: strength, lid: event.lid, gyro: event.g)
+            // Typing sets off a run of ignored events, two a second. Keep one line for the run, so the list and the
+            // log still show the taps that matter.
+            if outcome == .ignored, let last = recent.first, last.outcome == .ignored, last.detail == detail,
+               event.date.timeIntervalSince(last.date) < 3 {
+                recent[0] = entry
+                return
+            }
+            Log.sensor.notice("Tap \(event.id): strength \(String(format: "%.1f (twist %.1f °/s, jolt %.1f mg)", strength, event.peakG, impact * 1000), privacy: .public), \("\(outcome)", privacy: .public) \(label ?? "-", privacy: .public) \(detail, privacy: .public)\(why.map { " [" + $0 + "]" } ?? "", privacy: .public)")
+            recent.insert(entry, at: 0)
             if recent.count > 50 { recent.removeLast(recent.count - 50) }
         }
 
@@ -291,23 +309,28 @@ final class AppModel {
         // recogniser learns what they feel like and learns to reject them.
         if !noiseRecording, let (reason, detail) = inputGate(event) {
             record(.ignored, nil, nil, "Ignored: \(reason)", gateDetail: detail)
-            if calibration?.phase == .taps { flash(.ignored(reason)) }
+            learnNonTap(event, strength: strength)
+            // Motion with no jolt in it wasn't an attempt at a tap (a nudge, a lap shifting): nothing to tell the user.
+            if calibration?.phase == .taps, reason != TapDetector.notATap { flash(.ignored(reason)) }
             return
         }
+        // The menu bar icon answers taps, not every keystroke the sensor feels.
+        tapFlash = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in self?.tapFlash = false }
 
         if var cal = calibration {
             switch cal.phase {
             case .taps:
                 guard let label = cal.target else { return }
-                cal.lastStrength = event.peakG
+                cal.lastStrength = strength
                 cal.strengthID += 1
                 // Count only crisp taps: a soft tap barely above the sensor's background motion teaches the wrong
                 // thing. It is still kept (unused) as evidence of how hard taps land on this Mac.
-                let limit = config.autoTapStrength ? TapStrength.learned(from: zoneStrengths + [event.peakG]) : config.minTapStrength
                 let id = addSample(event, label: label)
-                if event.peakG < limit {
+                let limit = minTapStrength
+                if strength < limit {
                     calibration = cal
-                    record(.ignored, nil, nil, String(format: "Too soft (%.1f °/s, this Mac needs %.1f)", event.peakG, limit))
+                    record(.ignored, nil, nil, String(format: "Too soft (strength %.1f, this Mac needs %.1f)", strength, limit))
                     flash(.ignored("too soft"))
                     return
                 }
@@ -329,8 +352,8 @@ final class AppModel {
         }
 
         guard config.enabled else { return }
-        if event.peakG < minTapStrength {
-            record(.rejected, nil, nil, String(format: "Too soft (%.1f °/s). Tap a little crisper", event.peakG))
+        if strength < minTapStrength {
+            record(.rejected, nil, nil, String(format: "Too soft (strength %.1f of %.1f). Tap a little crisper", strength, minTapStrength))
             return
         }
         guard let model else {
@@ -357,6 +380,8 @@ final class AppModel {
             if presentsUI && config.showTapFeedback { TapFeedback.shared.show(zone: nil, grid: grid, action: nil) }
             return
         }
+        // The action may press keys of its own (switching desktops does); they are not the user typing.
+        input.ignoreKeys(from: event.time, for: 0.6)
         let error = performAction(action)
         record(.acted, p.label, confidence, error ?? action.title)
         if let z = zoneIndex(p.label) { ripple = (z, (ripple?.id ?? 0) + 1) }
@@ -365,6 +390,35 @@ final class AppModel {
             TapFeedback.shared.show(zone: zoneIndex(p.label), grid: grid, action: action)
         }
         if presentsUI && config.playSounds && action.kind != .none && !action.kind.hasSystemFeedback && error == nil { NSSound(named: "Pop")?.play() }
+    }
+
+    /// Most "not a tap" examples LidTap keeps by itself (never fewer than 20 allowed, never more than 60, and no
+    /// more than there are taps, so they can't outweigh them).
+    var learnedLimit: Int { max(20, min(60, dataset.zoneTapCount)) }
+
+    /// Keeps a keystroke or click the sensor felt as a "not a tap" example, so the recogniser learns what the
+    /// Mac feels like in daily use, not only in the 20 seconds of the calibration's bump step.
+    ///
+    /// Only an event that was certainly not a tap on the screen is kept: one with a key or click right on it
+    /// (80 ms before to 50 ms after the trigger), or one in the middle of typing (six key events in the 1.5 s
+    /// before, one of them within a quarter of a second). A shortcut pressed a moment before a tap is neither.
+    /// On a 14" MacBook Pro, 28 such examples cut the bumps read as taps (things moved on the desk, hands
+    /// settling, a lap) from 3 in 22 to 1 without losing a tap, since a keystroke shakes the base much as they do.
+    /// Retrains after every 15 kept, until `learnedLimit`.
+    private func learnNonTap(_ event: TapEvent, strength: Double) {
+        guard config.learnFromTyping, calibration == nil, model != nil, event.gated == nil, strength >= minTapStrength else { return }
+        let learned = dataset.learnedCount
+        guard learned < learnedLimit else { return }
+        let t0 = event.time
+        let onIt = !input.times([.key, .click], from: t0 - 0.08, to: t0 + 0.05).isEmpty
+        let midTyping = input.times([.key], from: t0 - 1.5, to: t0).count >= 6 && !input.times([.key], from: t0 - 0.25, to: t0 + 0.15).isEmpty
+        guard onIt || midTyping else { return }
+        let id = addSample(event, label: noiseLabel)
+        if let i = dataset.samples.firstIndex(where: { $0.id == id }) { dataset.samples[i].auto = true }
+        if (learned + 1) % 15 == 0 || learned + 1 == learnedLimit {
+            Log.app.notice("Learned \(learned + 1) keystrokes and clicks as not-a-tap examples; retraining")
+            scheduleRetrain()
+        }
     }
 
     /// Should input around this tap disqualify it? Typing and clicking shake the laptop like a tap, and macOS
@@ -416,9 +470,10 @@ final class AppModel {
         let s = TapSample(id: nextSampleID, label: label, wall: event.date.timeIntervalSince1970, lid: event.lid,
                           peakG: event.peakG, peakA: event.peakA,
                           g: event.g.map { $0.map { ($0 * 1000).rounded() / 1000 } },
-                          a: event.a.map { $0.map { ($0 * 10000).rounded() / 10000 } })
+                          a: event.a.map { $0.map { ($0 * 100000).rounded() / 100000 } })  // 0.01 mg: a heavy Mac's tap is a few mg
         nextSampleID += 1
         features[s.id] = Features.extract(g: s.g, a: s.a)
+        strengths[s.id] = TapStrength.strength(twist: s.peakG, impact: TapStrength.impact(s.a))
         dataset.samples.append(s)
         scheduleSave()
         return s.id
@@ -512,6 +567,49 @@ final class AppModel {
         if wasCollecting { retrain() }
     }
 
+    // MARK: Left / Right
+
+    /// Can the recorded taps be regrouped into the display's left and right halves, with no new calibration?
+    var canRegroupLeftRight: Bool {
+        guard calibration == nil || calibration?.phase == .done, dataset.grid != .leftRight, dataset.grid.cols >= 2 else { return false }
+        let halves = Set(dataset.samples.compactMap { zoneIndex($0.label).flatMap(dataset.grid.half(ofZone:)) })
+        return halves.count == 2
+    }
+
+    /// Switches to the Left / Right layout, keeping the calibration: every recorded tap is relabelled by the half
+    /// of the display it was made on (the middle column of a three-column grid belongs to neither and is dropped)
+    /// and the recogniser is retrained. The zones get the two-zone default actions.
+    func regroupLeftRight() {
+        guard canRegroupLeftRight else { return }
+        let old = dataset.grid
+        var kept: [TapSample] = []
+        for var s in dataset.samples {
+            if s.label != noiseLabel {
+                guard let half = zoneIndex(s.label).flatMap(old.half(ofZone:)) else { continue }
+                s.label = zoneLabel(half)
+            }
+            kept.append(s)
+        }
+        Log.app.notice("Regrouping \(self.dataset.zoneTapCount) taps on \(old.title, privacy: .public) into Left / Right")
+        dataset.samples = kept
+        dataset.grid = .leftRight
+        config.actions = ZoneAction.defaults(for: .leftRight)
+        scheduleSave()
+        // From the calibration result screen, show the new result there.
+        if var cal = calibration {
+            cal.grid = .leftRight
+            cal.phase = .training
+            calibration = cal
+            retrain { [weak self] in
+                guard let self, var c = self.calibration else { return }
+                c.phase = .done
+                self.calibration = c
+            }
+        } else {
+            retrain()
+        }
+    }
+
     // MARK: Data
 
     func deleteSamples(label: String) {
@@ -533,13 +631,24 @@ final class AppModel {
     func count(for label: String) -> Int { dataset.count(label) }
 
     /// The weakest tap LidTap records or acts on: learned from this Mac's taps (`TapStrength`), or set by hand.
-    var minTapStrength: Double { config.autoTapStrength ? TapStrength.learned(from: zoneStrengths) : config.minTapStrength }
-    private var zoneStrengths: [Double] { dataset.samples.compactMap { $0.label == noiseLabel ? nil : $0.peakG } }
+    var minTapStrength: Double { config.autoTapStrength ? TapStrength.learned(byZone: zoneStrengths) : config.minTapStrength }
+    private var zoneStrengths: [String: [Double]] {
+        var out: [String: [Double]] = [:]
+        for s in dataset.samples where s.label != noiseLabel { out[s.label, default: []].append(strength(of: s)) }
+        return out
+    }
+
+    /// How hard a recorded tap landed (twist or jolt, see `TapStrength`).
+    func strength(of s: TapSample) -> Double {
+        strengths[s.id] ?? TapStrength.strength(twist: s.peakG, impact: TapStrength.impact(s.a))
+    }
 
     /// Recorded taps strong enough to learn from (bumps always count: they teach what isn't a tap).
     private func usable() -> (TapSample) -> Bool {
         let limit = minTapStrength
-        return { $0.label == noiseLabel || $0.peakG >= limit }
+        return { [strengths] s in
+            s.label == noiseLabel || (strengths[s.id] ?? TapStrength.strength(twist: s.peakG, impact: TapStrength.impact(s.a))) >= limit
+        }
     }
     func usableCount(for label: String) -> Int {
         let ok = usable()
@@ -597,6 +706,9 @@ final class AppModel {
         }
     }
 
+    /// Test hook: show a given report (snapshot tests draw screens for scores real fixtures don't produce).
+    func showReportForTesting(_ r: ModelReport) { report = r }
+
     /// Makes any training still running in the background drop its result (it learned from data that is gone).
     private func discardTraining() {
         trainGeneration += 1
@@ -629,7 +741,11 @@ final class AppModel {
     private func loadDataset(profile id: String) {
         dataset = store.loadDataset(profile: id)
         features = [:]
-        for s in dataset.samples { features[s.id] = Features.extract(g: s.g, a: s.a) }
+        strengths = [:]
+        for s in dataset.samples {
+            features[s.id] = Features.extract(g: s.g, a: s.a)
+            strengths[s.id] = TapStrength.strength(twist: s.peakG, impact: TapStrength.impact(s.a))
+        }
         nextSampleID = (dataset.samples.map(\.id).max() ?? 0) + 1
     }
 

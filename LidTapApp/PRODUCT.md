@@ -20,7 +20,7 @@ The laptop already contains the sensor: the motion sensor in the base feels the 
 - Privacy Guard is used under social pressure (someone walks up mid-call) and must be instant and calm.
 
 ## Capabilities and Constraints
-- Zones are coarse (2×2, 2×3, 3×3); accuracy is measured and shown honestly (cross-validated), never claimed.
+- Zones are coarse (Left / Right, 2×2, 2×3, 3×3); accuracy is measured and shown honestly (cross-validated), never claimed.
 - Undocumented motion sensor; accuracy changes with lid angle and surface.
 - Needs Accessibility (key events) and sometimes Input Monitoring; Automation for Google Meet tabs.
 - Ad-hoc signed build; macOS 14+ deployment, running on macOS 27.

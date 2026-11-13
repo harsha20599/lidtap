@@ -12,7 +12,7 @@ final class UpdateWindow: NSObject, NSWindowDelegate {
             let host = NSHostingController(rootView: UpdateView(updater: updater, close: { [weak self] in self?.close() }))
             host.sizingOptions = [.preferredContentSize]
             let w = NSWindow(contentViewController: host)
-            w.title = "Software Update"
+            w.title = String(localized: "Software Update")
             w.styleMask = [.titled, .closable]
             w.isReleasedWhenClosed = false
             w.delegate = self
@@ -48,30 +48,30 @@ struct UpdateView: View {
     private var content: some View {
         switch updater.state {
         case .idle, .checking:
-            Text("Checking for updates…").font(.headline)
+            Text(String(localized: "Checking for updates…")).font(.headline)
             ProgressView().progressViewStyle(.linear)
-            buttons { Button("Cancel", action: close).keyboardShortcut(.cancelAction) }
+            buttons { Button(String(localized: "Cancel"), action: close).keyboardShortcut(.cancelAction) }
 
         case .upToDate:
-            Text("LidTap is up to date").font(.headline)
-            Text("You have the latest version, \(updater.current.description).").foregroundStyle(.secondary)
-            buttons { Button("OK", action: close).keyboardShortcut(.defaultAction) }
+            Text(String(localized: "LidTap is up to date")).font(.headline)
+            Text(String(localized: "You have the latest version, \(updater.current.description).")).foregroundStyle(.secondary)
+            buttons { Button(String(localized: "OK"), action: close).keyboardShortcut(.defaultAction) }
 
         case .available:
             if let release = updater.available { available(release) }
 
         case .downloading, .installing:
-            Text(updater.state == .downloading ? "Downloading LidTap \(updater.available?.version.description ?? "")…"
-                                               : "Installing… LidTap will reopen in a moment.")
+            Text(updater.state == .downloading ? String(localized: "Downloading LidTap \(updater.available?.version.description ?? "")…")
+                                               : String(localized: "Installing… LidTap will reopen in a moment."))
                 .font(.headline)
             ProgressView().progressViewStyle(.linear)
 
         case .failed(let message):
-            Text("Couldn't update LidTap").font(.headline)
+            Text(String(localized: "Couldn't update LidTap")).font(.headline)
             Text(message).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             buttons {
-                Button("Close", action: close).keyboardShortcut(.cancelAction)
-                Button("Download from GitHub") {
+                Button(String(localized: "Close"), action: close).keyboardShortcut(.cancelAction)
+                Button(String(localized: "Download from GitHub")) {
                     NSWorkspace.shared.open(updater.available?.page ?? Updater.releasesPage)
                     close()
                 }
@@ -82,12 +82,12 @@ struct UpdateView: View {
 
     @ViewBuilder
     private func available(_ release: Release) -> some View {
-        Text("A new version of LidTap is available").font(.headline)
-        Text("LidTap \(release.version.description) is available. You have \(updater.current.description). Would you like to install it now?")
+        Text(String(localized: "A new version of LidTap is available")).font(.headline)
+        Text(String(localized: "LidTap \(release.version.description) is available. You have \(updater.current.description). Would you like to install it now?"))
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         if !release.notes.isEmpty {
-            Text("Release notes").font(.subheadline.weight(.semibold)).padding(.top, 4)
+            Text(String(localized: "Release notes")).font(.subheadline.weight(.semibold)).padding(.top, 4)
             ScrollView {
                 Text(notes(release.notes))
                     .font(.callout)
@@ -98,16 +98,16 @@ struct UpdateView: View {
             .frame(height: 160)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
         }
-        Text("The update comes from LidTap's GitHub releases and is installed only if it's signed by LidTap's developer. Your calibration and settings are kept.")
+        Text(String(localized: "The update comes from LidTap's GitHub releases and is installed only if it's signed by LidTap's developer. Your calibration and settings are kept."))
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         HStack {
-            Button("Skip This Version") { updater.skip(release); close() }
+            Button(String(localized: "Skip This Version")) { updater.skip(release); close() }
             Spacer()
-            Button("Remind Me Later") { updater.remindLater(); close() }
+            Button(String(localized: "Remind Me Later")) { updater.remindLater(); close() }
                 .keyboardShortcut(.cancelAction)
-            Button("Install Update") { Task { await updater.install(release) } }
+            Button(String(localized: "Install Update")) { Task { await updater.install(release) } }
                 .keyboardShortcut(.defaultAction)
         }
         .padding(.top, 6)

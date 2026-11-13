@@ -25,13 +25,13 @@ extension AppModel {
     /// One line describing how a profile is calibrated: live for the profile in use, remembered for the rest.
     func summary(of p: Profile) -> (text: String, needsCalibration: Bool) {
         let active = p.id == config.activeProfileID
-        if active && isTraining { return ("Learning your taps…", false) }
+        if active && isTraining { return (String(localized: "Learning your taps…"), false) }
         let grid = active ? self.grid : (p.grid ?? self.grid)
         let taps = active ? dataset.zoneTapCount - softTapCount : p.taps
         let acc = active ? (isTrained ? accuracy : nil) : p.accuracy
-        guard taps > 0 else { return ("Not calibrated yet", true) }
-        var parts = [grid.title, "\(taps) taps"]
-        if let acc { parts.append("\(Int((acc * 100).rounded()))% accurate") }
+        guard taps > 0 else { return (String(localized: "Not calibrated yet"), true) }
+        var parts = [grid.title, String(localized: "\(taps) taps")]
+        if let acc { parts.append(String(localized: "\(Int((acc * 100).rounded()))% accurate")) }
         return (parts.joined(separator: " · "), acc == nil)
     }
 }
@@ -66,7 +66,7 @@ struct ProfileSwitcher: View {
         }
         .disabled(!app.canChangeProfile)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Profile")
+        .accessibilityLabel(String(localized: "Profile"))
     }
 
     private func track(_ profiles: [Profile], fill: Bool) -> some View {
@@ -113,7 +113,7 @@ struct ProfileSwitcher: View {
         .buttonStyle(.plain)
         .modifier(NumberShortcut(index: index))
         .help(index < 9 ? "\(p.name)  ⌘\(index + 1)" : p.name)
-        .accessibilityLabel(p.name + (needs ? ", not calibrated" : ""))
+        .accessibilityLabel(p.name + (needs ? String(localized: ", not calibrated") : ""))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 }
@@ -134,7 +134,7 @@ struct ProfilePicker: View {
     @Environment(AppModel.self) private var app
 
     var body: some View {
-        Picker("Profile", selection: Binding(get: { app.config.activeProfileID }, set: { app.switchProfile(to: $0) })) {
+        Picker(String(localized: "Profile"), selection: Binding(get: { app.config.activeProfileID }, set: { app.switchProfile(to: $0) })) {
             ForEach(app.config.profiles) { p in
                 Label(p.name, systemImage: p.symbol).tag(p.id)
             }
@@ -142,7 +142,7 @@ struct ProfilePicker: View {
         .pickerStyle(.menu)
         .fixedSize()
         .disabled(!app.canChangeProfile)
-        .help("Zones, training and detection settings belong to this profile")
+        .help(String(localized: "Zones, training and detection settings belong to this profile"))
     }
 }
 
@@ -161,30 +161,30 @@ struct ProfilesPane: View {
                         row(p, index: i)
                     }
                 } header: {
-                    Text("Profiles")
+                    Text(String(localized: "Profiles"))
                 } footer: {
                     HStack(alignment: .firstTextBaseline) {
-                        Text("Switch from the LidTap menu, or with ⌘1–⌘\(min(app.config.profiles.count, 9)) while it's open.")
+                        Text(String(localized: "Switch from the LidTap menu, or with ⌘1–⌘\(min(app.config.profiles.count, 9)) while it's open."))
                         Spacer()
-                        Button("Add Profile…") { editing = .new }.disabled(!app.canChangeProfile)
+                        Button(String(localized: "Add Profile…")) { editing = .new }.disabled(!app.canChangeProfile)
                     }
                 }
                 Section {
-                    LabeledContent("Each profile has its own") { Text("Calibration, zone actions and sensitivity") }
-                    LabeledContent("Shared by all profiles") { Text("Privacy Guard, feedback, sounds and updates") }
+                    LabeledContent(String(localized: "Each profile has its own")) { Text(String(localized: "Calibration, zone actions and sensitivity")) }
+                    LabeledContent(String(localized: "Shared by all profiles")) { Text(String(localized: "Privacy Guard, feedback, sounds and updates")) }
                 }
             } else {
                 Section { intro }
             }
         }
         .sheet(item: $editing) { mode in ProfileEditor(mode: mode).environment(app) }
-        .confirmationDialog("Delete “\(deleting?.name ?? "")”?", isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
-            Button("Delete Profile", role: .destructive) {
+        .confirmationDialog(String(localized: "Delete “\(deleting?.name ?? "")”?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } })) {
+            Button(String(localized: "Delete Profile"), role: .destructive) {
                 if let p = deleting { withAnimation(DS.Motion.state) { app.deleteProfile(p.id) } }
                 deleting = nil
             }
         } message: {
-            Text("Its recorded taps are moved to the Trash. Other profiles aren't affected.")
+            Text(String(localized: "Its recorded taps are moved to the Trash. Other profiles aren't affected."))
         }
     }
 
@@ -196,17 +196,17 @@ struct ProfilesPane: View {
                 ProfileIcon(symbol: "sofa", size: 44)
             }
             .padding(.bottom, 4)
-            Text("A setup for every place").font(.title3.weight(.semibold))
-            Text("Taps feel different on a desk, on your lap or on a sofa. A profile gives each place its own calibration, zone actions and sensitivity. Switch between them from the menu bar.")
+            Text(String(localized: "A setup for every place")).font(.title3.weight(.semibold))
+            Text(String(localized: "Taps feel different on a desk, on your lap or on a sofa. A profile gives each place its own calibration, zone actions and sensitivity. Switch between them from the menu bar."))
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .frame(maxWidth: 440)
-            Button("Add Profile…") { editing = .new }
+            Button(String(localized: "Add Profile…")) { editing = .new }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
                 .disabled(!app.canChangeProfile)
-            Text("What you've set up so far is kept as your “\(app.config.activeProfile?.name ?? Profile.defaultName)” profile.")
+            Text(String(localized: "What you've set up so far is kept as your “\(app.config.activeProfile?.name ?? Profile.defaultName)” profile."))
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
@@ -223,7 +223,7 @@ struct ProfilesPane: View {
                 HStack(spacing: 6) {
                     Text(p.name).font(.body.weight(.medium))
                     if active {
-                        Text("In Use")
+                        Text(String(localized: "In Use"))
                             .font(.caption2.weight(.semibold))
                             .padding(.horizontal, 6).padding(.vertical, 1.5)
                             .foregroundStyle(Color.accentColor)
@@ -242,7 +242,7 @@ struct ProfilesPane: View {
             Spacer(minLength: 8)
             if index < 9 { Text("⌘\(index + 1)").font(.caption).monospacedDigit().foregroundStyle(.tertiary) }
             if !active {
-                Button("Switch") { withAnimation(DS.Motion.state) { app.switchProfile(to: p.id) } }
+                Button(String(localized: "Switch")) { withAnimation(DS.Motion.state) { app.switchProfile(to: p.id) } }
                     .disabled(!app.canChangeProfile)
             }
             Menu {
@@ -253,7 +253,7 @@ struct ProfilesPane: View {
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help("More")
+            .help(String(localized: "More"))
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
@@ -263,11 +263,11 @@ struct ProfilesPane: View {
 
     @ViewBuilder
     private func actions(_ p: Profile, _ needsCalibration: Bool) -> some View {
-        Button("Edit…") { editing = .edit(p) }
-        Button(needsCalibration ? "Calibrate…" : "Calibrate Again…") { app.calibrateProfile(p.id) }
+        Button(String(localized: "Edit…")) { editing = .edit(p) }
+        Button(needsCalibration ? String(localized: "Calibrate…") : String(localized: "Calibrate Again…")) { app.calibrateProfile(p.id) }
             .disabled(!app.canChangeProfile)
         Divider()
-        Button("Delete…", role: .destructive) { deleting = p }
+        Button(String(localized: "Delete…"), role: .destructive) { deleting = p }
             .disabled(!app.canChangeProfile)
     }
 }
@@ -316,14 +316,14 @@ struct ProfileEditor: View {
                     .contentTransition(.symbolEffect(.replace))
                     .animation(DS.Motion.state, value: symbol)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(isNew ? "New Profile" : "Edit Profile").font(.title3.weight(.semibold))
-                    Text(isNew ? "A setup for one place you use your Mac." : "Rename it or pick another icon.")
+                    Text(isNew ? String(localized: "New Profile") : String(localized: "Edit Profile")).font(.title3.weight(.semibold))
+                    Text(isNew ? String(localized: "A setup for one place you use your Mac.") : String(localized: "Rename it or pick another icon."))
                         .foregroundStyle(.secondary)
                 }
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                TextField("Name", text: $name, prompt: Text("Lap, Sofa, Kitchen table…"))
+                TextField(String(localized: "Name"), text: $name, prompt: Text(String(localized: "Lap, Sofa, Kitchen table…")))
                     .textFieldStyle(.roundedBorder)
                     .controlSize(.large)
                     .focused($nameFocused)
@@ -334,7 +334,7 @@ struct ProfileEditor: View {
             }
 
             VStack(alignment: .leading, spacing: 8) {
-                caption("Icon")
+                caption(String(localized: "Icon"))
                 LazyVGrid(columns: Array(repeating: GridItem(.fixed(34), spacing: 8), count: 10), alignment: .leading, spacing: 8) {
                     ForEach(Profile.symbols, id: \.self) { s in symbolButton(s) }
                 }
@@ -342,15 +342,15 @@ struct ProfileEditor: View {
 
             if isNew {
                 VStack(alignment: .leading, spacing: 8) {
-                    caption("Start with")
-                    option(selected: !copyTaps, symbol: "scope", title: "Calibrate on the new surface",
-                           detail: "Recommended: taps feel different on each surface. About two minutes.") { copyTaps = false }
-                    option(selected: copyTaps, symbol: "doc.on.doc", title: "A copy of “\(currentName)”",
-                           detail: canCopy ? "Ready right away. Calibrate later if taps are misread." : "“\(currentName)” isn't calibrated yet.") { copyTaps = true }
+                    caption(String(localized: "Start with"))
+                    option(selected: !copyTaps, symbol: "scope", title: String(localized: "Calibrate on the new surface"),
+                           detail: String(localized: "Recommended: taps feel different on each surface. About two minutes.")) { copyTaps = false }
+                    option(selected: copyTaps, symbol: "doc.on.doc", title: String(localized: "A copy of “\(currentName)”"),
+                           detail: canCopy ? String(localized: "Ready right away. Calibrate later if taps are misread.") : String(localized: "“\(currentName)” isn't calibrated yet.")) { copyTaps = true }
                         .disabled(!canCopy)
                     Text(app.config.hasProfiles
-                         ? "Zone actions and sensitivity start as a copy of “\(currentName)”. Change them any time."
-                         : "Zone actions and sensitivity start as a copy of your current setup, which is kept as “\(currentName)”.")
+                         ? String(localized: "Zone actions and sensitivity start as a copy of “\(currentName)”. Change them any time.")
+                         : String(localized: "Zone actions and sensitivity start as a copy of your current setup, which is kept as “\(currentName)”."))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
@@ -359,8 +359,8 @@ struct ProfileEditor: View {
 
             HStack {
                 Spacer()
-                Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(isNew ? (copyTaps ? "Create Profile" : "Create and Calibrate") : "Save", action: commit)
+                Button(String(localized: "Cancel")) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button(isNew ? (copyTaps ? String(localized: "Create Profile") : String(localized: "Create and Calibrate")) : String(localized: "Save"), action: commit)
                     .keyboardShortcut(.defaultAction)
                     .disabled(problem != nil)
             }
@@ -411,7 +411,7 @@ struct ProfileEditor: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(s.replacingOccurrences(of: ".", with: " "))
+        .accessibilityLabel(L10n.icon(s))
         .accessibilityAddTraits(on ? .isSelected : [])
     }
 

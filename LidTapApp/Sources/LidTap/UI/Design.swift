@@ -159,7 +159,7 @@ struct DisplayMap: View {
         }
         .aspectRatio(NSScreen.builtInAspect, contentMode: .fit)
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Zones on your screen")
+        .accessibilityLabel(String(localized: "Zones on your screen"))
     }
 
     private func hairlines(w: CGFloat, h: CGFloat, size: CGSize) -> some View {
@@ -214,9 +214,9 @@ struct DisplayMap: View {
         .onHover { hovered = $0 ? i : (hovered == i ? nil : hovered) }
         .onTapGesture { onSelect?(i) }
         .contextMenu { if let contextMenu { contextMenu(i) } }
-        .help("Zone \(i + 1): \(a.title)")
+        .help(String(localized: "Zone \(i + 1): \(a.title)"))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Zone \(i + 1), \(a.title)")
+        .accessibilityLabel(String(localized: "Zone \(i + 1), \(a.title)"))
         .accessibilityAddTraits(isSelected ? [.isSelected, .isButton] : .isButton)
         .animation(DS.Motion.feedback, value: isHovered)
         .animation(DS.Motion.state, value: isSelected)
@@ -271,7 +271,7 @@ struct MotionTrace: View {
                 }
             }
         }
-        .accessibilityLabel("Live motion from the sensor")
+        .accessibilityLabel(String(localized: "Live motion from the sensor"))
     }
 }
 

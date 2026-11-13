@@ -37,7 +37,8 @@ The build is ad-hoc signed, so after each rebuild macOS may need Accessibility s
 | Path | Role |
 |---|---|
 | `Sources/LidTap/Core/IMUReader.swift` | IOKit access to the IMU (~800 Hz) and lid-angle sensor |
-| `Sources/LidTap/Core/TapDetector.swift` | High-pass, adaptive gyro trigger, 200 ms tap windows, input/lid gates |
+| `Sources/LidTap/Core/TapDetector.swift` | Trigger on twist (gyro) or jolt (accelerometer) over a robust resting level, 200 ms tap windows, lid and no-jolt gates |
+| `Sources/LidTap/Core/TapStrength.swift` | Tap strength from twist and jolt on one scale; the per-Mac, per-zone minimum |
 | `Sources/LidTap/Core/Features.swift` | 70 tap features, identical to the Python prototype |
 | `Sources/LidTap/Core/Classifiers.swift`, `ZoneModel.swift` | Logistic regression, kNN, nearest centroid; cross-validation; open-set rejection |
 | `Sources/LidTap/Core/Store.swift` | Config and dataset in `~/Library/Application Support/LidTap` (added profiles' taps in `profiles/<id>.json`) |

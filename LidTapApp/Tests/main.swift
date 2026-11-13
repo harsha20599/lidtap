@@ -12,7 +12,7 @@ MainActor.assumeIsolated {
     NSApp.finishLaunching()
     let all: [(String, () -> Void)] = [
         ("ml", mlTests), ("detector", detectorTests), ("logic", appLogicTests), ("profiles", profileTests), ("update", updaterTests), ("updatelive", updaterLiveTests), ("ui", uiTests),
-        ("hardware", hardwareTests), ("actions", actionTests), ("guard", guardTests), ("e2e", endToEndTests), ("diag", diagnosticTests), ("sweep", rejectSweep), ("augment", augmentDiag),
+        ("hardware", hardwareTests), ("actions", actionTests), ("guard", guardTests), ("e2e", endToEndTests), ("diag", diagnosticTests), ("sweep", rejectSweep), ("augment", augmentDiag), ("replay", replayDiag),
     ]
     for (name, run) in all where suites.contains(name) { run() }
     exit(T.summary())

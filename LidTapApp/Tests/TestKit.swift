@@ -96,6 +96,74 @@ func event(from s: TapSample, id: Int, gated: String? = nil, noise: Double = 0) 
                     peakG: s.peakG, peakA: s.peakA, lid: s.lid, threshold: 1, noise: 0.1, gated: gated)
 }
 
+/// The same tap landing harder or softer: twist and jolt scaled together until its strength is `strength`.
+func resized(_ e: TapEvent, strength: Double) -> TapEvent {
+    let k = strength / max(e.strength, 1e-9)
+    return TapEvent(id: e.id, time: e.time, date: e.date, g: e.g.map { $0.map { $0 * k } }, a: e.a.map { $0.map { $0 * k } },
+                    peakG: e.peakG * k, peakA: e.peakA * k, lid: e.lid, threshold: e.threshold, noise: e.noise, gated: e.gated,
+                    gateDetail: e.gateDetail, preMotion: e.preMotion)
+}
+
+func resized(_ s: TapSample, strength: Double) -> TapSample {
+    let k = strength / max(TapStrength.strength(twist: s.peakG, impact: TapStrength.impact(s.a)), 1e-9)
+    var out = s
+    out.g = s.g.map { $0.map { $0 * k } }
+    out.a = s.a.map { $0.map { $0 * k } }
+    out.peakG = s.peakG * k
+    out.peakA = s.peakA * k
+    return out
+}
+
+/// A raw sensor recording from a real Mac: the sensor's own gyroscope (deg/s) and accelerometer (g) samples, with
+/// the stretches of it named (e.g. "still", "z0" while the top-left corner is tapped, "typing").
+///
+/// Recordings are someone's own Mac and hands, so none is kept in the repository; tests that need one are skipped
+/// without it. To use one, put two files in Tests/Fixtures:
+///   <name>.json  {"rate": samples per second, "rows": row count, "segments": [{"name", "start", "end"}]} (seconds)
+///   <name>.bin   raw DEFLATE of little-endian int32 rows [gx, gy, gz, ax, ay, az] in Q16.16, evenly spaced at
+///                `rate`, each row stored as its difference from the row before
+/// `tools/imu_probe.py` shows how to read the sensors.
+struct RawStream {
+    var rate: Double
+    var gyro: [SIMD3<Double>]   // deg/s
+    var accel: [SIMD3<Double>]  // g
+    var segments: [(name: String, start: Double, end: Double)]
+
+    func segment(_ name: String) -> (start: Double, end: Double) {
+        let s = segments.first { $0.name == name }!
+        return (s.start, s.end)
+    }
+}
+
+extension T {
+    /// `name` is a fixture, or with `directory` a recording anywhere (`<name>.json` beside `<name>.bin`).
+    /// Throws `Skip` when the recording isn't there.
+    nonisolated static func loadStream(_ name: String = "pro14_stream", in directory: URL? = nil) throws -> RawStream {
+        let dir = directory ?? fixtures
+        guard let json = try? Data(contentsOf: dir.appendingPathComponent("\(name).json")),
+              let packed = try? Data(contentsOf: dir.appendingPathComponent("\(name).bin")) else {
+            throw Skip(reason: "needs a raw recording, \(name).json and \(name).bin in \(directory == nil ? "Tests/Fixtures" : dir.path) (see RawStream)")
+        }
+        let meta = try JSONSerialization.jsonObject(with: json) as! [String: Any]
+        let data = try (packed as NSData).decompressed(using: .zlib) as Data
+        let rows = meta["rows"] as! Int
+        precondition(data.count == rows * 24, "stream fixture is \(data.count) bytes, want \(rows * 24)")
+        var gyro: [SIMD3<Double>] = [], accel: [SIMD3<Double>] = []
+        var acc = [Int32](repeating: 0, count: 6)   // rows are stored as differences
+        data.withUnsafeBytes { raw in
+            for r in 0..<rows {
+                for c in 0..<6 { acc[c] &+= Int32(littleEndian: raw.loadUnaligned(fromByteOffset: (r * 6 + c) * 4, as: Int32.self)) }
+                gyro.append(SIMD3(Double(acc[0]), Double(acc[1]), Double(acc[2])) / 65536)
+                accel.append(SIMD3(Double(acc[3]), Double(acc[4]), Double(acc[5])) / 65536)
+            }
+        }
+        let segments = (meta["segments"] as! [[String: Any]]).map {
+            (name: $0["name"] as! String, start: ($0["start"] as! NSNumber).doubleValue, end: ($0["end"] as! NSNumber).doubleValue)
+        }
+        return RawStream(rate: (meta["rate"] as! NSNumber).doubleValue, gyro: gyro, accel: accel, segments: segments)
+    }
+}
+
 /// Renders a SwiftUI view offscreen to a PNG in the artifacts folder.
 @MainActor
 @discardableResult

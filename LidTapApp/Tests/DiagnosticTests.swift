@@ -145,3 +145,56 @@ func augmentDiag() {
         }
     }
 }
+
+/// Replays a raw recording of live taps against a calibration, through the detector and the app exactly as shipped.
+///   LIDTAP_REPLAY_STREAM=/path/to/recording (without .json/.bin)  LIDTAP_REPLAY_DATASET=/path/to/dataset.json  build/LidTapTests replay
+@MainActor
+func replayDiag() {
+    T.suite = "Diagnostics"
+    print("\n▶ Replay a recording against a calibration")
+    let env = ProcessInfo.processInfo.environment
+    guard let streamPath = env["LIDTAP_REPLAY_STREAM"], let datasetPath = env["LIDTAP_REPLAY_DATASET"] else {
+        print("  set LIDTAP_REPLAY_STREAM and LIDTAP_REPLAY_DATASET")
+        return
+    }
+    T.run("live taps from the recording, as the app would handle them") {
+        let url = URL(fileURLWithPath: streamPath)
+        let stream = try T.loadStream(url.lastPathComponent, in: url.deletingLastPathComponent())
+        let dataset = try JSONDecoder().decode(Dataset.self, from: Data(contentsOf: URL(fileURLWithPath: datasetPath)))
+        let h = AppHarness(name: "replay", dataset: dataset)
+        guard h.train() else { return T.fail("no model") }
+        // LIDTAP_REPLAY_LEFT_RIGHT=1: regroup the calibration into two sides first, and score each tap by its side.
+        let sides = env["LIDTAP_REPLAY_LEFT_RIGHT"] != nil
+        let was = dataset.grid
+        if sides {
+            h.app.regroupLeftRight()
+            guard T.wait(30, { h.app.report?.grid == .leftRight && !h.app.isTraining }) else { return T.fail("no two-side model") }
+        }
+        T.note(String(format: "trained %@ on %d taps, cross-validated %d%%, strength limit %.2f", h.app.activeKind?.title ?? "-", h.app.report?.sampleCount ?? 0,
+                      Int(((h.app.accuracy ?? 0) * 100).rounded()), h.app.minTapStrength))
+        let sim = StreamSim(settings: DetectorSettings())
+        sim.feed(stream)
+        var total = ["correct": 0, "wrong": 0, "declined": 0, "too soft": 0, "ignored": 0]
+        for seg in stream.segments where zoneIndex(seg.name) != nil {
+            var row: [String] = []
+            for e in sim.events where e.time >= seg.start && e.time < seg.end {
+                h.app.handle(TapEvent(id: e.id, time: MachClock.now() + Double(e.id) * 10, date: Date(), g: e.g, a: e.a, peakG: e.peakG, peakA: e.peakA, lid: e.lid,
+                                      threshold: e.threshold, noise: e.noise, gated: e.gated, gateDetail: e.gateDetail, preMotion: e.preMotion))
+                guard let r = h.app.lastRecord else { continue }
+                let kind: String
+                switch r.outcome {
+                case .acted: kind = r.label == (sides ? zoneIndex(seg.name).flatMap(was.half(ofZone:)).map(zoneLabel) : seg.name) ? "correct" : "wrong"
+                case .rejected: kind = r.detail.hasPrefix("Too soft") ? "too soft" : "declined"
+                default: kind = "ignored"
+                }
+                total[kind, default: 0] += 1
+                row.append(kind == "wrong" ? "wrong(\(r.label ?? "?"))" : kind == "ignored" ? r.detail : kind)
+                if h.app.privacyGuard.isActive { h.app.privacyGuard.release() }
+            }
+            T.note("\(seg.name): \(row.joined(separator: ", "))")
+        }
+        let n = total.values.reduce(0, +), acted = total["correct"]! + total["wrong"]!
+        T.note("\(n) taps: \(total["correct"]!) correct, \(total["wrong"]!) wrong, \(total["declined"]!) declined as unsure, \(total["too soft"]!) too soft, \(total["ignored"]!) ignored")
+        T.note(String(format: "right when it acts: %d%% · acted on %d%% of taps", acted == 0 ? 0 : 100 * total["correct"]! / acted, n == 0 ? 0 : 100 * acted / n))
+    }
+}

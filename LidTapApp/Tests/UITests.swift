@@ -50,6 +50,11 @@ func uiTests() {
          DisplayMap(grid: grid33, action: { actions33[zoneLabel($0)] ?? ZoneAction() }, style: .large, selected: 6).padding())
     shot("display map reliability", CGSize(width: 620, height: 420),
          DisplayMap(grid: h.app.grid, action: h.app.action(for:), style: .large, reliability: h.app.report?.zoneReliability ?? [:]).padding())
+    let sides = ZoneAction.defaults(for: .leftRight)
+    shot("display map left right", CGSize(width: 620, height: 420),
+         DisplayMap(grid: .leftRight, action: { sides[zoneLabel($0)] ?? ZoneAction() }, style: .large, selected: 1).padding())
+    shot("display map left right regular", CGSize(width: 300, height: 220),
+         DisplayMap(grid: .leftRight, action: { sides[zoneLabel($0)] ?? ZoneAction() }, style: .regular).padding())
     shot("display map compact", CGSize(width: 300, height: 220),
          DisplayMap(grid: grid33, action: { actions33[zoneLabel($0)] ?? ZoneAction() }, style: .compact).padding())
 
@@ -67,7 +72,24 @@ func uiTests() {
     shot("calibration done", size, CalibrationView().environment(h.app))
     h.app.calibration = CalibrationState(grid: grid33, perZone: 15, sequence: ["z4"], position: 0)
     shot("calibration 3x3 target centre", size, CalibrationView().environment(h.app))
+    // Left / Right: the dot moves down the zone round by round (top, bottom, middle).
+    let lr = Array(repeating: "z0", count: 5) + Array(repeating: "z1", count: 5) + Array(repeating: "z0", count: 5) + Array(repeating: "z1", count: 5)
+    for (name, position) in [("calibration left right top", 0), ("calibration left right bottom", 15)] {
+        h.app.calibration = CalibrationState(grid: .leftRight, perZone: 15, sequence: lr, position: position)
+        shot(name, size, CalibrationView().environment(h.app))
+    }
     h.app.calibration = nil
+
+    // A grid that scores low while the two sides score well offers Left / Right on the result screen.
+    let weak = AppHarness(name: "ui-weak")
+    if weak.train(), let r = weak.app.report, let kind = weak.app.activeKind {
+        var low = r
+        low.scores = r.scores.map { s in s.kind == kind ? ModelScore(kind: kind, accuracy: s.accuracy.merging([Layouts.full: 0.78, Layouts.leftRight: 0.92]) { $1 }) : s }
+        weak.app.showReportForTesting(low)
+        weak.app.calibration = CalibrationState(grid: weak.app.grid, perZone: 15, sequence: [], position: 0, phase: .done)
+        shot("calibration done suggests left right", size, CalibrationView().environment(weak.app))
+        weak.app.calibration = nil
+    }
 
     let g = PrivacyGuard(presentsOverlay: false)
     g.muteMic = false

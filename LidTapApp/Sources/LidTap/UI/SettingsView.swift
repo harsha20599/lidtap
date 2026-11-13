@@ -132,7 +132,7 @@ private struct ZonesPane: View {
             } header: {
                 Text("Layout")
             } footer: {
-                Text("Fewer zones are more reliable. A new layout needs a new calibration.")
+                Text("Fewer zones are more reliable: Left / Right suits larger, heavier MacBooks, where a tap moves the base least. A new layout needs a new calibration, except Left / Right, which reuses the taps you have.")
             }
         }
         .onAppear {
@@ -147,12 +147,24 @@ private struct ZonesPane: View {
         .onChange(of: app.grid) { selected = 0 }
         .alert("Switch to \(pendingGrid?.title ?? "")?", isPresented: Binding(get: { pendingGrid != nil }, set: { if !$0 { pendingGrid = nil } })) {
             Button("Cancel", role: .cancel) { pendingGrid = nil }
-            Button("Switch and Calibrate") {
-                if let g = pendingGrid { app.startCalibration(grid: g) }
-                pendingGrid = nil
+            if pendingGrid == .leftRight && app.canRegroupLeftRight {
+                Button("Switch") {
+                    app.regroupLeftRight()
+                    pendingGrid = nil
+                }
+            } else {
+                Button("Switch and Calibrate") {
+                    if let g = pendingGrid { app.startCalibration(grid: g) }
+                    pendingGrid = nil
+                }
             }
         } message: {
-            Text("The \(app.dataset.zoneTapCount) taps recorded for \(app.grid.title) will be replaced. Your bump examples are kept.")
+            if pendingGrid == .leftRight && app.canRegroupLeftRight {
+                Text("Your \(app.dataset.zoneTapCount) taps are regrouped into the left and right halves of the screen, so there's nothing to calibrate again."
+                     + (app.grid.cols % 2 == 1 ? " Taps from the middle column are dropped." : "") + " The two zones start with Desktop Left and Desktop Right.")
+            } else {
+                Text("The \(app.dataset.zoneTapCount) taps recorded for \(app.grid.title) will be replaced. Your bump examples are kept.")
+            }
         }
         .sheet(isPresented: $choosingApp) {
             AppPicker { info in
@@ -298,7 +310,7 @@ private struct TrainingPane: View {
                     VStack(alignment: .trailing, spacing: 1) {
                         Text("\(app.dataset.zoneTapCount - app.softTapCount) taps, \(app.count(for: noiseLabel)) bumps")
                         if app.softTapCount > 0 {
-                            Text(String(format: "%d softer than %.1f °/s, not used", app.softTapCount, app.minTapStrength))
+                            Text(String(format: "%d softer than strength %.1f, not used", app.softTapCount, app.minTapStrength))
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                     }
@@ -501,8 +513,8 @@ private struct DetectionPane: View {
             } footer: {
                 HStack(spacing: 14) {
                     Text(String(format: "%.0f Hz", app.status.rate))
-                    Text(String(format: "Noise %.2f °/s", app.status.noise))
-                    Text(String(format: "Trigger %.2f °/s", app.status.threshold))
+                    Text(String(format: "Resting %.2f °/s, %.1f mg", app.status.noise, app.status.impactNoise))
+                    Text(String(format: "Trigger %.2f °/s or %.1f mg", app.status.threshold, app.status.impactThreshold))
                     if let lid = app.status.lid { Text("Lid \(lid)°") }
                     Spacer()
                     Text("A tap fires when the line crosses the dashed trigger.")
@@ -513,13 +525,13 @@ private struct DetectionPane: View {
             Section("Sensitivity") {
                 Toggle(isOn: $app.config.autoTapStrength) {
                     Text("Learn tap strength from my taps")
-                    Text(String(format: "Softer taps than %.1f °/s are not recorded or acted on. A screen tap moves a larger, heavier MacBook less, so LidTap sets this from your own calibration taps", app.minTapStrength))
+                    Text(String(format: "Taps softer than strength %.1f are not recorded or acted on. A screen tap moves a larger, heavier MacBook less, so LidTap sets this from your own calibration taps", app.minTapStrength))
                 }
                 if !app.config.autoTapStrength {
-                    slider("Minimum tap strength", "Lower it if crisp taps are refused as too soft", $app.config.minTapStrength, 0.5...10, 0.1) { String(format: "%.1f °/s", $0) }
+                    slider("Minimum tap strength", "Lower it if crisp taps are refused as too soft. 1 is a twist of 1 °/s or a jolt of 3 mg", $app.config.minTapStrength, 0.5...10, 0.1) { String(format: "%.1f", $0) }
                 }
-                slider("Trigger", "How far above the resting noise a tap must rise", $app.config.detector.k, 2...15, 0.5) { String(format: "%.1f× noise", $0) }
-                slider("Minimum", "Raise if bumps register as taps. Lower if gentle taps are missed", $app.config.detector.minThreshold, 0.2...20, 0.1) { String(format: "%.1f °/s", $0) }
+                slider("Trigger", "How far above the resting level a tap's twist or jolt must rise", $app.config.detector.k, 2...15, 0.5) { String(format: "%.1f× resting", $0) }
+                slider("Minimum", "Raise if bumps register as taps. Lower if gentle taps are missed. The jolt trigger moves with it, at 2 mg for each °/s", $app.config.detector.minThreshold, 0.2...20, 0.1) { String(format: "%.1f °/s", $0) }
                 slider("Gap between taps", "Shorter allows quicker repeat taps", $app.config.detector.refractory, 0.15...1, 0.05) { String(format: "%.2f s", $0) }
                 slider("Pause after typing", "Taps this soon after a key, click or scroll are ignored", $app.config.detector.gateSeconds, 0...1, 0.05) { String(format: "%.2f s", $0) }
                 Toggle(isOn: $app.config.detector.gating) {

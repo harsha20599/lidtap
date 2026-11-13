@@ -76,6 +76,17 @@ func mlTests() {
         T.expect(!r.learning.isEmpty && r.learning.last!.accuracy > r.learning.first!.accuracy - 0.05, "learning curve should rise")
     }
 
+    T.run("one stray bump doesn't void the accuracy check") {
+        // A single "not a tap" example (a quiet 20 seconds in the bump step) once made every score come out empty,
+        // and the result screen read 0%.
+        let bump = (0..<TapDetector.n).map { i in (0..<3).map { _ in i > 24 ? 2.0 : 0.1 } }
+        let r = Evaluator.evaluate(X: X + [Features.extract(g: bump, a: bump.map { $0.map { $0 / 300 } })], labels: labels + [noiseLabel], grid: ds.grid)
+        let acc = r.accuracy(r.best) ?? -1
+        T.note("accuracy with a lone bump in the data: \(Int(acc * 100))%")
+        T.expect(acc >= 0.85 && r.sampleCount == 61, "accuracy \(acc), samples \(r.sampleCount)")
+        T.expect(r.confusion?.flatMap { $0 }.reduce(0, +) == 60 && !r.labels.contains(noiseLabel), "the lone bump was scored")
+    }
+
     T.run("layout mappings for 2×2, 2×3 and 3×3") {
         let g33 = Layouts.all(for: Grid(rows: 3, cols: 3))
         T.expect(g33.map(\.0) == ["Full grid", "Columns", "Left / right", "Rows", "Top / bottom", "Corners"], "3×3 layouts \(g33.map(\.0))")
@@ -83,6 +94,10 @@ func mlTests() {
         T.expect(lr("z0") == "L" && lr("z2") == "R" && lr("z1") == nil && lr("z4") == nil && lr(noiseLabel) == noiseLabel, "3×3 left/right drops the middle column")
         let corners = g33.first { $0.0 == "Corners" }!.1
         T.expect(corners("z0") == "q00" && corners("z8") == "q11" && corners("z4") == nil, "3×3 corners")
+        T.expect(Layouts.all(for: .leftRight).map(\.0) == ["Full grid"], "Left / Right has nothing coarser: \(Layouts.all(for: .leftRight).map(\.0))")
+        T.expect(Grid.leftRight.title == "Left / Right" && Grid(rows: 2, cols: 2).title == "2×2" && Grid.presets.first == .leftRight, "layout names")
+        let g3 = Grid(rows: 3, cols: 3)
+        T.expect((0..<9).map { g3.half(ofZone: $0) } == [0, nil, 1, 0, nil, 1, 0, nil, 1] && (0..<4).map { Grid(rows: 2, cols: 2).half(ofZone: $0) } == [0, 1, 0, 1], "halves of a grid")
         let g23 = Layouts.all(for: Grid(rows: 2, cols: 3))
         let tb = g23.first { $0.0 == "Top / bottom" }!.1
         T.expect(tb("z1") == "T" && tb("z4") == "B", "2×3 top/bottom")

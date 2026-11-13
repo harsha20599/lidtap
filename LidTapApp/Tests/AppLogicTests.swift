@@ -147,13 +147,11 @@ func appLogicTests() {
         h.app.startCalibration(perZone: 18, block: 1)
         let n = h.app.dataset.samples.count
         let r = h.app.replayEvent(label: h.app.calibration!.target!)!
-        h.app.handle(TapEvent(id: r.id, time: r.time, date: r.date, g: r.g, a: r.a, peakG: 1.2, peakA: r.peakA, lid: r.lid,
-                              threshold: 1, noise: 0.1, gated: nil))
+        h.app.handle(resized(r, strength: 1.2))
         // Kept (unused) as evidence of how hard taps land on this Mac, but not counted.
-        T.expect(h.app.calibration?.position == 0 && h.app.calibration?.flash == .ignored("too soft"), "a 1.2 °/s calibration tap was counted")
+        T.expect(h.app.calibration?.position == 0 && h.app.calibration?.flash == .ignored("too soft"), "a calibration tap of strength 1.2 was counted")
         T.expect(h.app.dataset.samples.count == n + 1 && h.app.softTapCount == 1, "soft tap not kept as unused evidence")
-        h.app.handle(TapEvent(id: r.id + 1, time: r.time, date: r.date, g: r.g, a: r.a, peakG: 4, peakA: r.peakA, lid: r.lid,
-                              threshold: 1, noise: 0.1, gated: nil))
+        h.app.handle(resized(r, strength: 4))
         T.expect(h.app.calibration?.position == 1 && h.app.dataset.samples.count == n + 2, "a crisp calibration tap was not counted")
         h.app.endCalibration()
     }
@@ -189,10 +187,10 @@ func appLogicTests() {
 
     T.run("strength coaching: soft live taps never act; training uses only crisp taps") {
         var ds = T.loadDataset()
-        // Add 12 soft (1.5 °/s) taps, deliberately labelled as zone 1, that would poison training if used.
+        // Add 12 soft (strength 1.5) taps, deliberately labelled as zone 1, that would poison training if used.
         for i in 0..<12 {
-            var s = ds.samples[30 + i]
-            s.id = 1000 + i; s.label = "z0"; s.peakG = 1.5
+            var s = resized(ds.samples[30 + i], strength: 1.5)
+            s.id = 1000 + i; s.label = "z0"
             ds.samples.append(s)
         }
         let h = AppHarness(name: "strength", dataset: ds)
@@ -202,10 +200,10 @@ func appLogicTests() {
         T.expect((h.app.accuracy ?? 0) >= 0.9, "accuracy \(h.app.accuracy ?? 0) with soft taps excluded")
         let r = h.app.replayEvent(label: "z1")!
         h.performed.removeAll()
-        h.app.handle(TapEvent(id: r.id, time: r.time, date: r.date, g: r.g, a: r.a, peakG: 2.0, peakA: r.peakA, lid: r.lid,
-                              threshold: 1, noise: 0.1, gated: nil))
-        T.expect(h.performed.isEmpty && h.app.lastRecord?.outcome == .rejected, "a 2 °/s live tap acted")
-        T.expect(h.app.minTapStrength == TapStrength.ceiling, "learned limit \(h.app.minTapStrength) on a Mac whose taps are 7 °/s")
+        h.app.handle(resized(r, strength: 2.0))
+        T.expect(h.performed.isEmpty && h.app.lastRecord?.outcome == .rejected, "a live tap of strength 2 acted")
+        // Zone 1's typical tap is still a crisp one (15 crisp against 12 soft), so the limit stays well above the soft ones.
+        T.expect(h.app.minTapStrength > 2.2, "learned limit \(h.app.minTapStrength) on a Mac whose taps are strength 7")
         h.app.config.autoTapStrength = false
         h.app.config.minTapStrength = 1.0
         T.expect(T.wait(10) { h.app.report?.sampleCount == 72 && !h.app.isTraining }, "lowering the minimum did not retrain with all taps")
@@ -214,19 +212,22 @@ func appLogicTests() {
     T.run("tap strength limit: learned from this Mac's taps, between 1 and 3.5 °/s") {
         T.expect(TapStrength.learned(from: []) == 1.0, "no taps yet")
         T.expect(TapStrength.learned(from: [7, 6, 8, 9, 5]) == 3.5, "13-inch Air taps keep the 3.5 °/s limit")
-        T.expect(abs(TapStrength.learned(from: [2.4, 1.8, 2.1, 2.0, 1.6, 2.6]) - 2.05 * 2 / 3) < 1e-9, "16-inch taps \(TapStrength.learned(from: [2.4, 1.8, 2.1, 2.0, 1.6, 2.6]))")
-        T.expect(TapStrength.learned(from: [1.1, 1.2, 1.0]) == 1.0, "never below 1 °/s")
+        T.expect(abs(TapStrength.learned(from: [2.4, 1.8, 2.1, 2.0, 1.6, 2.6]) - 2.05 / 2) < 1e-9, "16-inch taps \(TapStrength.learned(from: [2.4, 1.8, 2.1, 2.0, 1.6, 2.6]))")
+        T.expect(TapStrength.learned(from: [1.1, 1.2, 1.0]) == 1.0, "never below 1")
+        T.expect(TapStrength.strength(twist: 0.6, impact: 0.012) == 4 && TapStrength.strength(twist: 7, impact: 0.012) == 7, "twist or jolt, whichever is larger")
     }
 
     T.run("16-inch MacBook Pro: weak screen taps calibrate, train and act") {
-        // The same taps, as a heavier Mac feels them: a quarter of the twist (median 1.8 °/s instead of 7).
+        // The same taps, as a heavier Mac feels them: a quarter of the twist and of the jolt (median 1.8 °/s instead of 7).
         var ds = T.loadDataset()
         for i in ds.samples.indices where ds.samples[i].label != noiseLabel {
             ds.samples[i].peakG *= 0.25
+            ds.samples[i].peakA *= 0.25
             ds.samples[i].g = ds.samples[i].g.map { $0.map { $0 * 0.25 } }
+            ds.samples[i].a = ds.samples[i].a.map { $0.map { $0 * 0.25 } }
         }
         let h = AppHarness(name: "big-mac", dataset: ds)
-        T.expect(h.app.minTapStrength < 1.4 && h.app.softTapCount < 10, "limit \(h.app.minTapStrength), \(h.app.softTapCount) taps refused")
+        T.expect(h.app.minTapStrength < 1.6 && h.app.softTapCount < 10, "limit \(h.app.minTapStrength), \(h.app.softTapCount) taps refused")
         guard h.train() else { return T.fail("no model") }
         T.note("accuracy with quarter-strength taps \(Int((h.app.accuracy ?? 0) * 100))%")
         T.expect((h.app.accuracy ?? 0) >= 0.8, "accuracy \(h.app.accuracy ?? 0)")
@@ -246,7 +247,108 @@ func appLogicTests() {
         h.app.config.minTapStrength = 3.5
         h.performed.removeAll()
         h.tap("z1")
-        T.expect(h.performed.isEmpty && h.app.lastRecord?.outcome == .rejected, "hand-set 3.5 °/s limit ignored")
+        T.expect(h.performed.isEmpty && h.app.lastRecord?.outcome == .rejected, "hand-set limit of 3.5 ignored")
+    }
+
+    T.run("14-inch MacBook Pro: real light taps calibrate, train and are told apart") {
+        // Taps recorded on a real 14" Pro, found by the detector and fed to a first calibration in the order made.
+        let (taps, _) = labelledTaps(in: try T.loadStream())
+        let h = AppHarness(name: "pro14", dataset: nil)
+        h.app.startCalibration(perZone: 30, block: 30)
+        var refused = 0
+        for (label, e) in taps {
+            // Calibration asks for one corner at a time; steer it to the corner this tap was made on.
+            guard var cal = h.app.calibration, let i = cal.sequence[cal.position...].firstIndex(of: label) else { continue }
+            cal.sequence.swapAt(cal.position, i)
+            h.app.calibration = cal
+            let before = cal.position
+            h.app.handle(TapEvent(id: e.id, time: MachClock.now(), date: Date(), g: e.g, a: e.a, peakG: e.peakG, peakA: e.peakA, lid: 110,
+                                  threshold: e.threshold, noise: e.noise, gated: nil, preMotion: e.preMotion))
+            if h.app.calibration?.position == before { refused += 1 }
+        }
+        h.app.endCalibration()
+        let used = (0..<4).map { h.app.usableCount(for: zoneLabel($0)) }
+        T.note(String(format: "%d taps felt, %d refused in calibration · learned limit %.2f · usable per corner %@", taps.count, refused, h.app.minTapStrength, "\(used)"))
+        // The far top corner lands softest (a few of its taps sit at the trigger and are asked again, as designed).
+        T.expect(used.allSatisfy { $0 >= 3 }, "usable taps per corner \(used)")
+        T.expect(Double(used.reduce(0, +)) >= 0.75 * Double(taps.count), "only \(used.reduce(0, +)) of \(taps.count) real taps were usable")
+        T.expect(T.wait(30) { h.app.isTrained && !h.app.isTraining }, "no model from the Pro's taps")
+        let acc = h.app.accuracy ?? 0
+        T.note("cross-validated accuracy on \(h.app.report?.sampleCount ?? 0) taps: \(Int((acc * 100).rounded()))% (\(h.app.activeKind?.title ?? "-"))")
+        T.expect(acc >= 0.7, "accuracy \(acc) on the Pro's own taps")
+    }
+
+    T.run("Left / Right: four-corner taps regroup into two sides, no new calibration") {
+        let h = AppHarness(name: "regroup")
+        guard h.train() else { return T.fail("no model") }
+        let four = h.app.accuracy ?? 0
+        T.expect(h.app.canRegroupLeftRight, "a 2×2 calibration should be regroupable")
+        h.app.regroupLeftRight()
+        T.expect(h.app.grid == .leftRight && h.app.dataset.samples.count == 60, "grid \(h.app.grid.title), \(h.app.dataset.samples.count) taps")
+        T.expect(h.app.count(for: "z0") == 30 && h.app.count(for: "z1") == 30, "sides \(h.app.count(for: "z0")) / \(h.app.count(for: "z1"))")
+        T.expect(h.app.config.actions.count == 2 && h.app.action(for: 0).kind == .desktopLeft && h.app.action(for: 1).kind == .desktopRight, "two-zone actions \(h.app.config.actions)")
+        T.expect(T.wait(30) { h.app.report?.grid == .leftRight && !h.app.isTraining }, "did not retrain on two sides")
+        T.note("four corners \(Int((four * 100).rounded()))% → two sides \(Int(((h.app.accuracy ?? 0) * 100).rounded()))%")
+        T.expect((h.app.accuracy ?? 0) >= 0.93 && !h.app.canRegroupLeftRight, "two-side accuracy \(h.app.accuracy ?? 0)")
+        // Taps made top-right and bottom-right now both run the right-hand action.
+        let right = T.loadDataset().samples.filter { $0.label == "z1" || $0.label == "z3" }
+        h.performed.removeAll()
+        for (i, s) in right.prefix(20).enumerated() { h.app.handle(event(from: s, id: 7000 + i, noise: 0.02)) }
+        T.expect(h.performed.filter { $0.kind == .desktopRight }.count >= 18 && !h.performed.contains { $0.kind == .desktopLeft },
+                 "right-side taps ran \(h.performed.map(\.kind.rawValue))")
+        // It survives a restart, like any other calibration.
+        h.app.flushSave()
+        let again = AppModel(store: Store(directory: h.dir), presentsUI: false)
+        T.expect(again.grid == .leftRight && again.dataset.samples.count == 60 && again.config.actions.count == 2, "regrouped layout not saved")
+    }
+
+    T.run("Left / Right: a three-column grid drops its middle column; one side alone can't regroup") {
+        var ds = T.loadDataset()
+        ds.grid = Grid(rows: 2, cols: 3)   // read the same taps as columns 0, 1, 2, 0 (for the bookkeeping only)
+        let h = AppHarness(name: "regroup3", dataset: ds)
+        h.app.regroupLeftRight()
+        T.expect(h.app.grid == .leftRight && h.app.count(for: "z0") == 30 && h.app.count(for: "z1") == 15 && h.app.dataset.samples.count == 45,
+                 "sides \(h.app.count(for: "z0")) / \(h.app.count(for: "z1")) of \(h.app.dataset.samples.count)")
+        var left = T.loadDataset()
+        left.samples.removeAll { $0.label == "z1" || $0.label == "z3" }
+        let one = AppHarness(name: "regroup-one", dataset: left)
+        T.expect(!one.app.canRegroupLeftRight, "taps on one side only can't make two sides")
+        one.app.regroupLeftRight()
+        T.expect(one.app.grid == Grid(rows: 2, cols: 2), "regrouped anyway")
+        // A fresh Left / Right calibration asks for both sides.
+        one.app.startCalibration(grid: .leftRight)
+        T.expect(one.app.grid == .leftRight && Set(one.app.calibration?.sequence ?? []) == ["z0", "z1"] && one.app.calibration?.sequence.count == 30
+                    && one.app.config.actions.count == 2, "Left / Right calibration \(one.app.calibration?.sequence.count ?? 0) taps")
+        one.app.endCalibration()
+    }
+
+    T.run("Left / Right is suggested when four corners score low and the two sides score well") {
+        func report(full: Double, sides: Double?, grid: Grid = Grid(rows: 2, cols: 2)) -> ModelReport {
+            var acc = [Layouts.full: full]
+            if let sides { acc[Layouts.leftRight] = sides }
+            return ModelReport(sampleCount: 60, grid: grid, labels: [], layouts: [], scores: [ModelScore(kind: .logreg, accuracy: acc)], best: .logreg,
+                               confusion: nil, learning: [], trainedAt: Date())
+        }
+        T.expect(report(full: 0.78, sides: 0.92).leftRightGain(.logreg) == 0.92, "a 14-inch Pro's scores should suggest it")
+        T.expect(report(full: 0.95, sides: 0.98).leftRightGain(.logreg) == nil, "a reliable grid needs no suggestion")
+        T.expect(report(full: 0.70, sides: 0.75).leftRightGain(.logreg) == nil, "two sides that are also unreliable aren't worth suggesting")
+        T.expect(report(full: 0.84, sides: 0.88).leftRightGain(.logreg) == nil, "a small gain isn't worth losing two zones")
+        T.expect(report(full: 0.78, sides: nil, grid: .leftRight).leftRightGain(.logreg) == nil, "already on Left / Right")
+    }
+
+    T.run("14-inch MacBook Pro: its real taps regroup into two sides and train") {
+        let (taps, _) = labelledTaps(in: try T.loadStream())
+        var ds = Dataset()
+        for (i, t) in taps.enumerated() where t.event.strength >= 1 {
+            ds.samples.append(TapSample(id: i + 1, label: t.label, wall: 0, lid: 110, peakG: t.event.peakG, peakA: t.event.peakA, g: t.event.g, a: t.event.a))
+        }
+        let h = AppHarness(name: "pro14-sides", dataset: ds)
+        guard h.train() else { return T.fail("no model") }
+        let four = h.app.accuracy ?? 0, predicted = h.app.report?.accuracy(h.app.activeKind ?? .logreg, Layouts.leftRight) ?? 0
+        h.app.regroupLeftRight()
+        T.expect(T.wait(30) { h.app.report?.grid == .leftRight && !h.app.isTraining }, "did not retrain")
+        T.note("four corners \(Int((four * 100).rounded()))% → two sides \(Int(((h.app.accuracy ?? 0) * 100).rounded()))% (predicted \(Int((predicted * 100).rounded()))%) on \(h.app.report?.sampleCount ?? 0) taps")
+        T.expect((h.app.accuracy ?? 0) >= 0.85, "two-side accuracy \(h.app.accuracy ?? 0) on the Pro")
     }
 
     T.run("first calibration on a weak-tap Mac: soft taps are kept and the limit settles") {
@@ -256,16 +358,15 @@ func appLogicTests() {
         var id = 5000
         @MainActor func tap(_ strength: Double) {
             id += 1
-            h.app.handle(TapEvent(id: id, time: MachClock.now(), date: Date(), g: template.g, a: template.a, peakG: strength,
-                                  peakA: template.peakA, lid: template.lid, threshold: 1, noise: 0.1, gated: nil))
+            h.app.handle(resized(event(from: template, id: id), strength: strength))
         }
-        for x in [2.0, 2.2, 1.9, 2.1, 2.0, 2.3] { tap(x) }
+        for x in [3.0, 3.3, 2.9, 3.1, 3.0, 3.4] { tap(x) }
         T.expect(h.app.calibration?.position == 6, "weak but steady taps refused: position \(h.app.calibration?.position ?? -1)")
-        tap(1.0)  // a fumbled tap, far softer than this Mac's usual
+        tap(1.2)  // a fumbled tap, far softer than this Mac's usual
         T.expect(h.app.calibration?.position == 6 && h.app.dataset.samples.count == 7, "fumble counted, or not kept as evidence")
         T.expect(h.app.softTapCount == 1, "soft count \(h.app.softTapCount)")
         h.app.undoLastCalibrationTap()  // removes the last counted tap, not the fumble
-        T.expect(h.app.calibration?.position == 5 && h.app.dataset.samples.contains { $0.peakG == 1.0 } && h.app.dataset.samples.count == 6,
+        T.expect(h.app.calibration?.position == 5 && h.app.dataset.samples.contains { abs(h.app.strength(of: $0) - 1.2) < 0.05 } && h.app.dataset.samples.count == 6,
                  "undo removed the wrong sample")
         h.app.endCalibration()
     }
@@ -296,12 +397,10 @@ func appLogicTests() {
         let h = AppHarness(name: "meter")
         h.app.startCalibration(perZone: 18, block: 1)
         let r = h.app.replayEvent(label: h.app.calibration!.target!)!
-        h.app.handle(TapEvent(id: r.id, time: r.time, date: r.date, g: r.g, a: r.a, peakG: 2.2, peakA: r.peakA, lid: r.lid,
-                              threshold: 1, noise: 0.1, gated: nil))
-        T.expect(h.app.calibration?.lastStrength == 2.2 && h.app.calibration?.strengthID == 1, "meter missed a soft tap")
-        h.app.handle(TapEvent(id: r.id + 1, time: r.time, date: r.date, g: r.g, a: r.a, peakG: 6.5, peakA: r.peakA, lid: r.lid,
-                              threshold: 1, noise: 0.1, gated: nil))
-        T.expect(h.app.calibration?.lastStrength == 6.5 && h.app.calibration?.position == 1, "meter or progress wrong after a crisp tap")
+        h.app.handle(resized(r, strength: 2.2))
+        T.expect(abs((h.app.calibration?.lastStrength ?? 0) - 2.2) < 1e-6 && h.app.calibration?.strengthID == 1, "meter missed a soft tap")
+        h.app.handle(resized(r, strength: 6.5))
+        T.expect(abs((h.app.calibration?.lastStrength ?? 0) - 6.5) < 1e-6 && h.app.calibration?.position == 1, "meter or progress wrong after a crisp tap")
         h.app.endCalibration()
     }
 
@@ -476,9 +575,11 @@ func appLogicTests() {
         guard h.train() else { return T.fail("no model") }
         h.app.config.modelChoice = ModelKind.centroid.rawValue
         T.expect(T.wait(10) { h.app.activeKind == .centroid }, "switching model did not refit (active \(String(describing: h.app.activeKind)))")
-        h.app.config.rejectFactor = 0.01  // absurdly strict: everything is unfamiliar
+        // Absurdly strict: everything is unfamiliar. (Not 0.01: a replayed tap sits that close to the tap it was
+        // made from about one time in seventeen, which made this test fail now and then.)
+        h.app.config.rejectFactor = 0.0001
         h.tap("z1")
-        T.expect(h.app.lastRecord?.outcome == .rejected, "strict reject factor not applied")
+        T.expect(h.app.lastRecord?.outcome == .rejected, "strict reject factor not applied: \(h.app.lastRecord.map { "\($0.outcome) \($0.label ?? "-") \($0.detail)" } ?? "no record")")
     }
 
     T.run("tap handling latency (features + predict + dispatch)") {

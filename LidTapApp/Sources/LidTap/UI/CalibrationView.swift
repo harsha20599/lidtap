@@ -114,6 +114,7 @@ private struct TapStage: View {
                 withAnimation(DS.Motion.state) {
                     ignoredText = reason == "too soft" ? "Not recorded: a little crisper, please"
                         : reason == "still moving" ? "Wait for the screen to settle, then tap"
+                        : reason == "lid moved" ? "The lid moved. Tap lightly, without pushing it"
                         : "Ignored (\(reason)). Tap again"
                 }
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { withAnimation(DS.Motion.state) { ignoredText = nil } }
@@ -157,8 +158,26 @@ private struct TapStage: View {
         let r = i / cal.grid.cols, c = i % cal.grid.cols
         let inset: CGFloat = 0.2
         let x = c == 0 ? w * inset : c == cal.grid.cols - 1 ? (CGFloat(c) + 1 - inset) * w : (CGFloat(c) + 0.5) * w
+        // A zone as tall as the screen is tapped anywhere along its height, so the dot moves with each round of
+        // taps: top, bottom, middle. Taps learned at one height alone would make the others look unfamiliar.
+        if cal.grid.rows == 1 { return CGPoint(x: x, y: h * Self.tallZoneHeights[tallZoneRound(i) % 3]) }
         let y = r == 0 ? h * inset + 30 : r == cal.grid.rows - 1 ? (CGFloat(r) + 1 - inset) * h : (CGFloat(r) + 0.36) * h
         return CGPoint(x: x, y: y)
+    }
+
+    private static let tallZoneHeights: [CGFloat] = [0.24, 0.76, 0.5]
+
+    /// Which round of taps a full-height zone is on in this calibration (a round is five taps).
+    private func tallZoneRound(_ i: Int) -> Int {
+        let label = zoneLabel(i)
+        return cal.sequence[..<min(cal.position, cal.sequence.count)].reduce(0) { $0 + ($1 == label ? 1 : 0) } / 5
+    }
+
+    /// Instructions go on the side of the zone away from the tap dot, so the dot is never covered.
+    private func instructionAlignment(_ i: Int) -> Alignment {
+        // A full-height zone keeps clear of the controls along the top: below the dot, or mid-zone when the dot is low.
+        if cal.grid.rows == 1 { return Self.tallZoneHeights[tallZoneRound(i) % 3] > 0.6 ? .center : .bottom }
+        return i / cal.grid.cols == cal.grid.rows - 1 ? .top : .bottom
     }
 
     @ViewBuilder
@@ -197,8 +216,7 @@ private struct TapStage: View {
             .minimumScaleFactor(0.6)
             .padding(.horizontal, 16)
             .padding(.vertical, isTarget ? 28 : 16)
-            // Keep the instructions on the side of the zone away from the tap dot, so the dot is never covered.
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isTarget ? (i / cal.grid.cols == cal.grid.rows - 1 ? .top : .bottom) : .center)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: isTarget ? instructionAlignment(i) : .center)
         }
         .animation(DS.Motion.state, value: isTarget)
         .accessibilityElement(children: .combine)
@@ -258,7 +276,7 @@ private struct StrengthMeter: View {
         }
         .animation(DS.Motion.feedback, value: id)
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(strength.map { String(format: "%@, %.1f degrees per second", verdict.0, $0) } ?? "Tap strength")
+        .accessibilityLabel(strength.map { String(format: "%@, strength %.1f", verdict.0, $0) } ?? "Tap strength")
     }
 }
 
@@ -283,7 +301,7 @@ private struct NoisePromptStage: View {
         StagePanel {
             Image(systemName: "checkmark.circle").font(.system(size: 40, weight: .light)).foregroundStyle(.green)
                 .symbolEffect(.bounce, value: true)
-            Text("All \(cal.grid.count) zones recorded").font(.title.weight(.semibold))
+            Text(cal.grid.count == 2 ? "Both zones recorded" : "All \(cal.grid.count) zones recorded").font(.title.weight(.semibold))
             Text("Recommended: show LidTap what isn't a tap, so it learns to ignore it. For 20 seconds, type a sentence, click the trackpad, knock the desk and nudge the lid. Just don't tap the screen.")
                 .font(.body).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             HStack(spacing: 10) {
@@ -339,8 +357,7 @@ private struct DoneStage: View {
 
     var body: some View {
         VStack(spacing: 22) {
-            if let report = app.report, let kind = app.activeKind {
-                let acc = report.accuracy(kind) ?? 0
+            if let report = app.report, let kind = app.activeKind, let acc = report.accuracy(kind) {
                 VStack(spacing: 6) {
                     Text("\(Int((acc * 100).rounded()))% of taps land in the right zone")
                         .font(.largeTitle.weight(.semibold))
@@ -353,8 +370,20 @@ private struct DoneStage: View {
                     .font(.callout).foregroundStyle(.secondary)
                     .frame(maxWidth: 520)
                     .fixedSize(horizontal: false, vertical: true)
+                if let sides = report.leftRightGain(kind), app.canRegroupLeftRight {
+                    HStack(spacing: 12) {
+                        Text("Left and right alone would be read correctly about \(Int((sides * 100).rounded()))% of the time, using the taps you just made.")
+                            .font(.callout).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Button("Use Left / Right") { app.regroupLeftRight() }
+                            .controlSize(.large)
+                    }
+                    .frame(maxWidth: 520)
+                }
             } else {
                 Text("Not enough taps to learn from yet").font(.title.weight(.semibold))
+                Text("Each zone needs at least two clean taps before LidTap can check how well it tells them apart.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             HStack(spacing: 10) {
                 Button("Add More Taps") { app.startCalibration(perZone: app.usableCount(for: zoneLabel(0)) + 5) }
@@ -376,6 +405,7 @@ private struct DoneStage: View {
     private func advice(_ r: ModelReport) -> String {
         let weak = r.zoneReliability.filter { $0.value < 0.85 }.keys.sorted().map { "\($0 + 1)" }
         if weak.isEmpty { return "Every zone is reliable. Tap gently, the way you just did." }
-        return "Zone \(weak.joined(separator: ", ")) " + (weak.count == 1 ? "gets" : "get") + " mixed up more often. Add a few more taps there, or switch to fewer zones."
+        return "Zone \(weak.joined(separator: ", ")) " + (weak.count == 1 ? "gets" : "get") + " mixed up more often. Add a few more taps there"
+            + (r.grid == .leftRight ? "." : ", or switch to fewer zones.")
     }
 }

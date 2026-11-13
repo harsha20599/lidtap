@@ -22,7 +22,7 @@ Made by [Yemcube (@yem.cube)](https://www.instagram.com/yem.cube).
 
 ## What a tap can do
 
-LidTap splits the display into zones: 2×2 by default, or 2×3 and 3×3. Each zone does one thing, and
+LidTap splits the display into zones: 2×2 by default, or Left / Right, 2×3 and 3×3. Each zone does one thing, and
 you choose which.
 
 | Action | What it does |
@@ -79,13 +79,19 @@ General. On 1.0.1 or earlier, download the new version once and replace the app 
 - During calibration the meter says **Good tap**, **A little crisper** or **Gentler is fine**. Aim for green.
 - Too many misreads? Settings → Training shows how reliable each zone is; **Calibrate Again** adds taps
   where they're needed.
-- **Taps refused as "Too soft"?** A screen tap moves a larger, heavier MacBook less (a 16" MacBook Pro
-  twists a half to a third as much as a 13" MacBook Air), so LidTap learns how hard taps land on *your* Mac
-  from your calibration taps. To set the limit by hand, turn off **Learn tap strength from my taps** in
-  Settings → Detection.
+- **Taps refused as "Too soft"?** A screen tap moves a larger, heavier MacBook less: a light tap twists a
+  13" MacBook Air 5 to 10 °/s and a 14" MacBook Pro under 1 °/s. LidTap therefore feels a tap two ways,
+  by its twist and by the small jolt it gives the base, and learns how hard taps land on *your* Mac, corner
+  by corner, from your calibration taps. To set the limit by hand, turn off **Learn tap strength from my
+  taps** in Settings → Detection.
 
-With crisp taps on a 2×2 grid, LidTap read 95% of taps correctly in our testing. Taps it isn't sure
-about are ignored rather than guessed.
+With crisp taps on a 2×2 grid, LidTap read 95% of taps correctly in our testing on a 13" MacBook Air. Taps
+it isn't sure about are ignored rather than guessed.
+
+**On a larger, heavier MacBook, use fewer zones.** A tap barely twists a 14" or 16" MacBook Pro, so corners
+are harder to tell apart: on a 14" Pro, four corners scored 78% and the two sides 90%. When the two sides
+would clearly do better, the calibration result offers **Use Left / Right**, which regroups the taps you
+just made, with nothing to calibrate again. You can also pick it in Settings → Zones → Layout.
 
 ## Which Macs work
 
@@ -153,7 +159,9 @@ hardware-free tests: `python -m unittest tests.test_prototype` from the repo roo
 them only when you aren't using the Mac.
 
 **How it works, briefly:** the app reads the accelerometer and gyroscope through IOKit HID
-(`AppleSPUHIDDevice`, ~800 Hz), high-pass filters the gyro, and triggers on an adaptive threshold.
+(`AppleSPUHIDDevice`, ~800 Hz) and triggers when either the twist (gyro, above 5 Hz) or the jolt
+(accelerometer, above 30 Hz) rises well over its own resting level, which is tracked from the quietest
+moments of the last three seconds so typing or a nudge doesn't deafen it.
 Each tap becomes a 200 ms window and 70 features (shape, timing, axis ratios and a resampled template),
 classified by a k-nearest-neighbours, logistic-regression or nearest-centroid model, whichever
 cross-validates best on your own data. Taps far from anything it has learned, or below its confidence

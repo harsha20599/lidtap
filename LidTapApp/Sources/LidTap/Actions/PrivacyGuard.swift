@@ -229,12 +229,12 @@ struct PrivacyOverlayView: View {
                     .font(.system(size: 52, weight: .light))
                     .foregroundStyle(.white)
                     .symbolEffect(.bounce, value: shown)
-                Text("Privacy Guard is on")
+                Text(String(localized: "Privacy Guard is on"))
                     .font(.system(size: 34, weight: .semibold))
                     .foregroundStyle(.white)
                 if let since = guardState.since {
                     TimelineView(.periodic(from: since, by: 1)) { ctx in
-                        Text("for \(Duration.seconds(ctx.date.timeIntervalSince(since)).formatted(.time(pattern: .minuteSecond)))")
+                        Text(String(localized: "for \(Duration.seconds(ctx.date.timeIntervalSince(since)).formatted(.time(pattern: .minuteSecond)))"))
                             .font(.title3).monospacedDigit()
                             .foregroundStyle(.white.opacity(0.6))
                     }
@@ -245,11 +245,11 @@ struct PrivacyOverlayView: View {
                 Divider().overlay(Color.white.opacity(0.12))
                 row(cameraSymbol, cameraText, cameraTone)
                 Divider().overlay(Color.white.opacity(0.12))
-                row("rectangle.on.rectangle.slash", "Every screen is hidden", .done)
+                row("rectangle.on.rectangle.slash", String(localized: "Every screen is hidden"), .done)
             }
             .frame(width: 420)
             .floatingGlass(cornerRadius: 18)
-            Text("Tap your Privacy Guard zone again, or click anywhere, to come back.")
+            Text(String(localized: "Tap your Privacy Guard zone again, or click anywhere, to come back."))
                 .font(.callout)
                 .foregroundStyle(.white.opacity(0.6))
         }
@@ -285,10 +285,10 @@ struct PrivacyOverlayView: View {
 
     private var micText: String {
         switch guardState.mic {
-        case .muted(let n): n == 1 ? "Microphone muted" : "\(n) microphones muted"
-        case .unavailable: "Couldn't mute the microphone"
-        case .skipped: "Microphone left on (your setting)"
-        case .idle: "Muting the microphone…"
+        case .muted(let n): n == 1 ? String(localized: "Microphone muted") : String(localized: "\(n) microphones muted")
+        case .unavailable: String(localized: "Couldn't mute the microphone")
+        case .skipped: String(localized: "Microphone left on (your setting)")
+        case .idle: String(localized: "Muting the microphone…")
         }
     }
 
@@ -305,12 +305,12 @@ struct PrivacyOverlayView: View {
 
     private var cameraText: String {
         switch guardState.camera {
-        case .checking, .idle: "Checking the camera…"
-        case .notInUse: "Camera isn't in use"
-        case .turnedOff(let app): "Camera turned off in \(app)"
-        case .stillOn(let app): app.map { "Camera may still be on in \($0)" } ?? "Camera is on in an app LidTap can't control"
-        case .needsAccessibility: "Camera is on. Allow Accessibility so LidTap can turn it off"
-        case .skipped: "Camera left alone (your setting)"
+        case .checking, .idle: String(localized: "Checking the camera…")
+        case .notInUse: String(localized: "Camera isn't in use")
+        case .turnedOff(let app): String(localized: "Camera turned off in \(app)")
+        case .stillOn(let app): app.map { String(localized: "Camera may still be on in \($0)") } ?? String(localized: "Camera is on in an app LidTap can't control")
+        case .needsAccessibility: String(localized: "Camera is on. Allow Accessibility so LidTap can turn it off")
+        case .skipped: String(localized: "Camera left alone (your setting)")
         }
     }
 

@@ -11,6 +11,7 @@ MainActor.assumeIsolated {
     NSApplication.shared.setActivationPolicy(.accessory)
     NSApp.finishLaunching()
     let all: [(String, () -> Void)] = [
+        ("localization", localizationTests),
         ("ml", mlTests), ("detector", detectorTests), ("logic", appLogicTests), ("profiles", profileTests), ("update", updaterTests), ("updatelive", updaterLiveTests), ("ui", uiTests),
         ("hardware", hardwareTests), ("actions", actionTests), ("guard", guardTests), ("e2e", endToEndTests), ("diag", diagnosticTests), ("sweep", rejectSweep), ("augment", augmentDiag),
     ]

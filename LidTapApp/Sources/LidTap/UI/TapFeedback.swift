@@ -79,7 +79,7 @@ private struct FeedbackView: View {
                 }
                 .position(x: rect.midX, y: rect.midY)
             } else {
-                Label("Not sure which zone. Tap again", systemImage: "questionmark.circle")
+                Label(String(localized: "Not sure which zone. Tap again"), systemImage: "questionmark.circle")
                     .font(.callout.weight(.medium))
                     .padding(.horizontal, 16).padding(.vertical, 9)
                     .floatingGlassCapsule()

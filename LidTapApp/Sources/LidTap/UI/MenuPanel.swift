@@ -40,14 +40,14 @@ struct MenuPanel: View {
             }
             Divider().padding(.horizontal, 8)
             VStack(spacing: 0) {
-                MenuRow(title: "Privacy Guard", symbol: "eye.slash") { dismiss(); app.privacyGuard.toggle() }
-                    .help("Mute every microphone, turn your meeting camera off and hide the screen")
+                MenuRow(title: String(localized: "Privacy Guard"), symbol: "eye.slash") { dismiss(); app.privacyGuard.toggle() }
+                    .help(String(localized: "Mute every microphone, turn your meeting camera off and hide the screen"))
                 if app.isTrained {
-                    MenuRow(title: "Calibrate Again…", symbol: "scope") { dismiss(); app.startCalibration() }
+                    MenuRow(title: String(localized: "Calibrate Again…"), symbol: "scope") { dismiss(); app.startCalibration() }
                 }
-                MenuRow(title: "Settings…", symbol: "gearshape", shortcut: "⌘,") { dismiss(); app.showSettings() }
+                MenuRow(title: String(localized: "Settings…"), symbol: "gearshape", shortcut: "⌘,") { dismiss(); app.showSettings() }
                     .keyboardShortcut(",", modifiers: .command)
-                MenuRow(title: "Quit LidTap", symbol: "power", shortcut: "⌘Q") { NSApp.terminate(nil) }
+                MenuRow(title: String(localized: "Quit LidTap"), symbol: "power", shortcut: "⌘Q") { NSApp.terminate(nil) }
                     .keyboardShortcut("q", modifiers: .command)
             }
             .padding(6)
@@ -71,20 +71,20 @@ struct MenuPanel: View {
             Toggle("LidTap", isOn: enabled)
                 .toggleStyle(.switch)
                 .labelsHidden()
-                .help(app.config.enabled ? "Pause LidTap" : "Resume LidTap")
+                .help(app.config.enabled ? String(localized: "Pause LidTap") : String(localized: "Resume LidTap"))
         }
     }
 
     private var statusLine: String {
-        if let e = app.status.error, !e.isEmpty { return "Motion sensor unavailable" }
-        if app.status.rate < 50 { return "Starting the motion sensor…" }
-        if app.privacyGuard.isActive { return "Privacy Guard is on" }
-        if app.calibration != nil { return "Calibrating" }
-        if !app.config.enabled { return "Paused" }
-        if app.isTraining { return "Learning your taps…" }
-        guard app.isTrained else { return "Not calibrated yet" }
-        let acc = app.accuracy.map { " · \(Int(($0 * 100).rounded()))% accurate" } ?? ""
-        return "Listening on \(app.grid.title)\(acc)"
+        if let e = app.status.error, !e.isEmpty { return String(localized: "Motion sensor unavailable") }
+        if app.status.rate < 50 { return String(localized: "Starting the motion sensor…") }
+        if app.privacyGuard.isActive { return String(localized: "Privacy Guard is on") }
+        if app.calibration != nil { return String(localized: "Calibrating") }
+        if !app.config.enabled { return String(localized: "Paused") }
+        if app.isTraining { return String(localized: "Learning your taps…") }
+        guard app.isTrained else { return String(localized: "Not calibrated yet") }
+        let acc = app.accuracy.map { String(localized: " · \(Int(($0 * 100).rounded()))% accurate") } ?? ""
+        return String(localized: "Listening on \(app.grid.title)\(acc)")
     }
 
     // MARK: Notices
@@ -96,12 +96,12 @@ struct MenuPanel: View {
             return Notice(symbol: "exclamationmark.triangle.fill", text: e, button: nil, action: nil)
         }
         if !app.status.accessibility {
-            return Notice(symbol: "hand.raised.fill", text: "Allow Accessibility to switch desktops and control music.",
-                          button: "Allow…", action: { Permissions.requestAccessibility(); Permissions.openPrivacyPane("Privacy_Accessibility") })
+            return Notice(symbol: "hand.raised.fill", text: String(localized: "Allow Accessibility to switch desktops and control music."),
+                          button: String(localized: "Allow…"), action: { Permissions.requestAccessibility(); Permissions.openPrivacyPane("Privacy_Accessibility") })
         }
         if let update = app.updater.available, app.updater.state == .available {
-            return Notice(symbol: "arrow.down.circle.fill", text: "LidTap \(update.version.description) is available.",
-                          button: "Update…", action: { dismiss(); app.showUpdate() })
+            return Notice(symbol: "arrow.down.circle.fill", text: String(localized: "LidTap \(update.version.description) is available."),
+                          button: String(localized: "Update…"), action: { dismiss(); app.showUpdate() })
         }
         return nil
     }
@@ -126,11 +126,11 @@ struct MenuPanel: View {
     private var firstRun: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text(app.config.hasProfiles
-                 ? "Calibrate “\(app.config.activeProfile?.name ?? "")” on this surface: tap each highlighted zone a few times. About two minutes."
-                 : "Tap each highlighted zone a few times so LidTap learns your screen. About two minutes.")
+                 ? String(localized: "Calibrate “\(app.config.activeProfile?.name ?? "")” on this surface: tap each highlighted zone a few times. About two minutes.")
+                 : String(localized: "Tap each highlighted zone a few times so LidTap learns your screen. About two minutes."))
                 .font(.callout).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
             Button { dismiss(); app.startCalibration() } label: {
-                Text("Calibrate").frame(maxWidth: .infinity)
+                Text(String(localized: "Calibrate")).frame(maxWidth: .infinity)
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
@@ -146,7 +146,7 @@ struct ZoneActionMenu: View {
 
     var body: some View {
         let current = app.action(for: zone).kind
-        Text("Zone \(zone + 1)")
+        Text(String(localized: "Zone \(zone + 1)"))
         ForEach(ActionKind.allCases.filter { !$0.needsChoice }) { kind in
             Button {
                 app.setAction(ZoneAction(kind: kind), for: zone)
@@ -155,8 +155,8 @@ struct ZoneActionMenu: View {
             }
         }
         Divider()
-        Button("Open App…") { dismiss(); app.showSettings(pane: "zones", zone: zone, choose: .openApp) }
-        Button("Run Shortcut…") { dismiss(); app.showSettings(pane: "zones", zone: zone, choose: .runShortcut) }
+        Button(String(localized: "Open App…")) { dismiss(); app.showSettings(pane: "zones", zone: zone, choose: .openApp) }
+        Button(String(localized: "Run Shortcut…")) { dismiss(); app.showSettings(pane: "zones", zone: zone, choose: .runShortcut) }
     }
 }
 

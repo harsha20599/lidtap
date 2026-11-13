@@ -32,6 +32,17 @@ anywhere to undo it all, including turning the camera back on.
 
 The build is ad-hoc signed, so after each rebuild macOS may need Accessibility switched off and on again.
 
+## Languages
+
+LidTap follows the macOS app language, with English and Simplified Chinese included in the bundle.
+Choose a per-app language in System Settings → General → Language & Region, then reopen LidTap.
+Existing profile names, app names, shortcut names and saved action identifiers stay unchanged.
+
+Translations live in `Resources/en.lproj` and `Resources/zh-Hans.lproj`. Keep format placeholders
+consistent across both tables; use positional placeholders when a translation reorders arguments.
+`scripts/build.sh` copies the language folders before code signing. Run `scripts/test-localization.sh`
+on macOS to check both languages, interpolation, permission text and stable identifiers.
+
 ## Layout
 
 | Path | Role |

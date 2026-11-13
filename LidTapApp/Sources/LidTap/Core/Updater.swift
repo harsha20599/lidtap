@@ -68,12 +68,12 @@ enum UpdateError: LocalizedError, Equatable {
 
     var errorDescription: String? {
         switch self {
-        case .unreadableFeed: "GitHub's answer didn't describe a LidTap release."
-        case .noDownload: "The latest release has no LidTap-macOS.zip to download."
-        case .network(let m): "Couldn't reach GitHub: \(m)"
-        case .badArchive: "The download didn't contain LidTap.app."
-        case .notSigned: "The download isn't signed by LidTap's developer, so it wasn't installed."
-        case .notNewer(let v): "The download is version \(v), which isn't newer than this one."
+        case .unreadableFeed: String(localized: "GitHub's answer didn't describe a LidTap release.")
+        case .noDownload: String(localized: "The latest release has no LidTap-macOS.zip to download.")
+        case .network(let m): String(localized: "Couldn't reach GitHub: \(m)")
+        case .badArchive: String(localized: "The download didn't contain LidTap.app.")
+        case .notSigned: String(localized: "The download isn't signed by LidTap's developer, so it wasn't installed.")
+        case .notNewer(let v): String(localized: "The download is version \(v), which isn't newer than this one.")
         case .cantReplace(let m): m
         }
     }
@@ -130,11 +130,11 @@ enum UpdateInstaller {
     /// Where the update goes: the running app's bundle, if LidTap can replace it.
     static func destination(for bundle: URL = Bundle.main.bundleURL) throws -> URL {
         if bundle.path.contains("/AppTranslocation/") {
-            throw UpdateError.cantReplace("Move LidTap to your Applications folder first, then update.")
+            throw UpdateError.cantReplace(String(localized: "Move LidTap to your Applications folder first, then update."))
         }
         let parent = bundle.deletingLastPathComponent()
         guard FileManager.default.isWritableFile(atPath: parent.path) else {
-            throw UpdateError.cantReplace("LidTap can't write to \(parent.path). Download the update from GitHub instead.")
+            throw UpdateError.cantReplace(String(localized: "LidTap can't write to \(parent.path). Download the update from GitHub instead."))
         }
         return bundle
     }
@@ -165,7 +165,7 @@ enum UpdateInstaller {
         p.arguments = ["-c", swapScript, "lidtap-update", String(pid), new.path, dest.path, relaunch ? "1" : "0", old.path]
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { throw UpdateError.cantReplace("Couldn't start the installer: \(error.localizedDescription)") }
+        do { try p.run() } catch { throw UpdateError.cantReplace(String(localized: "Couldn't start the installer: \(error.localizedDescription)")) }
         return p
     }
 }
@@ -221,7 +221,7 @@ final class Updater {
         do {
             let (data, response) = try await session.data(from: feed)
             if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                throw UpdateError.network(http.statusCode == 404 ? "no release published yet" : "GitHub answered \(http.statusCode)")
+                throw UpdateError.network(http.statusCode == 404 ? String(localized: "no release published yet") : String(localized: "GitHub answered \(http.statusCode)"))
             }
             let release = try Release.parse(data)
             defaults.set(Date(), forKey: "updateLastChecked")
@@ -274,14 +274,14 @@ final class Updater {
             let tmp: URL, response: URLResponse
             do { (tmp, response) = try await session.download(from: release.download) }
             catch { throw UpdateError.network(error.localizedDescription) }
-            if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw UpdateError.network("download answered \(http.statusCode)") }
+            if let http = response as? HTTPURLResponse, http.statusCode != 200 { throw UpdateError.network(String(localized: "download answered \(http.statusCode)")) }
             try FileManager.default.moveItem(at: tmp, to: zip)
         }
         let staged = folder.appendingPathComponent("staged", isDirectory: true)
         let app = try await Task.detached { try UpdateInstaller.unpack(zip, into: staged) }.value
         try await Task.detached { try UpdateInstaller.verify(app) }.value
         let version = UpdateInstaller.version(of: app)
-        guard let version, version > current else { throw UpdateError.notNewer(version?.description ?? "unknown") }
+        guard let version, version > current else { throw UpdateError.notNewer(version?.description ?? String(localized: "unknown")) }
         return app
     }
 

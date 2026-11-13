@@ -290,7 +290,7 @@ final class AppModel {
         // During the bump step everything is recorded, typing and clicking included: that is how the
         // recogniser learns what they feel like and learns to reject them.
         if !noiseRecording, let (reason, detail) = inputGate(event) {
-            record(.ignored, nil, nil, "Ignored: \(reason)", gateDetail: detail)
+            record(.ignored, nil, nil, String(localized: "Ignored: \(L10n.gate(reason))"), gateDetail: detail)
             if calibration?.phase == .taps { flash(.ignored(reason)) }
             return
         }
@@ -307,7 +307,7 @@ final class AppModel {
                 let id = addSample(event, label: label)
                 if event.peakG < limit {
                     calibration = cal
-                    record(.ignored, nil, nil, String(format: "Too soft (%.1f °/s, this Mac needs %.1f)", event.peakG, limit))
+                    record(.ignored, nil, nil, String(format: String(localized: "Too soft (%.1f °/s, this Mac needs %.1f)"), event.peakG, limit))
                     flash(.ignored("too soft"))
                     return
                 }
@@ -318,10 +318,10 @@ final class AppModel {
                 flash(.recorded(label))
                 if let z = zoneIndex(label) { ripple = (z, (ripple?.id ?? 0) + 1) }
                 if config.playSounds && presentsUI { NSSound(named: "Tink")?.play() }
-                record(.recorded, label, nil, "Recorded for Zone \((zoneIndex(label) ?? 0) + 1)")
+                record(.recorded, label, nil, String(localized: "Recorded for Zone \((zoneIndex(label) ?? 0) + 1)"))
             case .noise:
                 addSample(event, label: noiseLabel)
-                record(.recorded, noiseLabel, nil, "Recorded as a not-a-tap example")
+                record(.recorded, noiseLabel, nil, String(localized: "Recorded as a not-a-tap example"))
             default:
                 break
             }
@@ -330,11 +330,11 @@ final class AppModel {
 
         guard config.enabled else { return }
         if event.peakG < minTapStrength {
-            record(.rejected, nil, nil, String(format: "Too soft (%.1f °/s). Tap a little crisper", event.peakG))
+            record(.rejected, nil, nil, String(format: String(localized: "Too soft (%.1f °/s). Tap a little crisper"), event.peakG))
             return
         }
         guard let model else {
-            record(.untrained, nil, nil, "Tap detected. Calibrate to map it to a zone")
+            record(.untrained, nil, nil, String(localized: "Tap detected. Calibrate to map it to a zone"))
             return
         }
         let p = model.predict(Features.extract(g: event.g, a: event.a), rejectFactor: config.rejectFactor)
@@ -343,16 +343,16 @@ final class AppModel {
         if privacyGuard.isActive {
             if p.rejected == nil && action.kind == .privacyGuard {
                 privacyGuard.release()
-                record(.acted, p.label, p.confidence, "Privacy Guard off")
+                record(.acted, p.label, p.confidence, String(localized: "Privacy Guard off"))
             } else {
-                record(.guarded, p.label, p.confidence, "Ignored while Privacy Guard is on")
+                record(.guarded, p.label, p.confidence, String(localized: "Ignored while Privacy Guard is on"))
             }
             return
         }
         // Privacy Guard hides the screen and mutes the mic, so a guess must be much surer before it fires.
         let floor = action.kind == .privacyGuard ? max(config.minConfidence, 0.85) : config.minConfidence
         let confidence = p.confidence
-        if let reason = p.rejected ?? (confidence < floor ? "Not sure which zone" : nil) {
+        if let reason = p.rejected ?? (confidence < floor ? String(localized: "Not sure which zone") : nil) {
             record(.rejected, p.label, confidence, reason)
             if presentsUI && config.showTapFeedback { TapFeedback.shared.show(zone: nil, grid: grid, action: nil) }
             return

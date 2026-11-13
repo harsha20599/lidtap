@@ -30,7 +30,7 @@ struct ProfileSettings: Codable, Equatable {
 struct Profile: Codable, Equatable, Identifiable {
     /// The setup everyone starts with. Its taps stay in dataset.json, where they always were.
     static let defaultID = "default"
-    static let defaultName = "Default"
+    static let defaultName = String(localized: "Default")
     static let defaultSymbol = "laptopcomputer"
     static let maxNameLength = 24
 
@@ -71,18 +71,18 @@ struct Profile: Codable, Equatable, Identifiable {
     /// Why `name` can't be used, or nil if it can. `excluding` is the profile being renamed.
     static func problem(with name: String, among profiles: [Profile], excluding: String? = nil) -> String? {
         let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if n.isEmpty { return "Give the profile a name." }
-        if n.count > maxNameLength { return "Use \(maxNameLength) characters or fewer." }
+        if n.isEmpty { return String(localized: "Give the profile a name.") }
+        if n.count > maxNameLength { return String(localized: "Use \(maxNameLength) characters or fewer.") }
         if profiles.contains(where: { $0.id != excluding && $0.name.compare(n, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
-            return "There's already a profile called “\(n)”."
+            return String(localized: "There's already a profile called “\(n)”.")
         }
         return nil
     }
 
     /// Places people tap their Mac, offered when making a profile.
     static let suggestions: [(name: String, symbol: String)] = [
-        ("Desk", "table.furniture"), ("Lap", "figure.seated.side"), ("Sofa", "sofa"),
-        ("Bed", "bed.double"), ("Café", "cup.and.saucer"), ("Travel", "airplane"),
+        (String(localized: "Desk"), "table.furniture"), (String(localized: "Lap"), "figure.seated.side"), (String(localized: "Sofa"), "sofa"),
+        (String(localized: "Bed"), "bed.double"), (String(localized: "Café"), "cup.and.saucer"), (String(localized: "Travel"), "airplane"),
     ]
 
     static let symbols = [

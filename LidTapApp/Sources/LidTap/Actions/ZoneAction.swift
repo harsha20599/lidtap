@@ -7,37 +7,37 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .none: "Nothing"
-        case .desktopLeft: "Desktop Left"
-        case .desktopRight: "Desktop Right"
-        case .newNote: "New Note"
-        case .playPause: "Play / Pause"
-        case .nextTrack: "Next Track"
-        case .previousTrack: "Previous Track"
-        case .volumeUp: "Volume Up"
-        case .volumeDown: "Volume Down"
-        case .mute: "Mute Sound"
-        case .openApp: "Open App"
-        case .runShortcut: "Run Shortcut"
-        case .privacyGuard: "Privacy Guard"
+        case .none: String(localized: "Nothing")
+        case .desktopLeft: String(localized: "Desktop Left")
+        case .desktopRight: String(localized: "Desktop Right")
+        case .newNote: String(localized: "New Note")
+        case .playPause: String(localized: "Play / Pause")
+        case .nextTrack: String(localized: "Next Track")
+        case .previousTrack: String(localized: "Previous Track")
+        case .volumeUp: String(localized: "Volume Up")
+        case .volumeDown: String(localized: "Volume Down")
+        case .mute: String(localized: "Mute Sound")
+        case .openApp: String(localized: "Open App")
+        case .runShortcut: String(localized: "Run Shortcut")
+        case .privacyGuard: String(localized: "Privacy Guard")
         }
     }
 
     var detail: String {
         switch self {
-        case .none: "This zone does nothing"
-        case .desktopLeft: "Switch to the Space on the left"
-        case .desktopRight: "Switch to the Space on the right"
-        case .newNote: "Open Notes with a fresh note"
-        case .playPause: "Play or pause whatever is playing"
-        case .nextTrack: "Skip to the next track"
-        case .previousTrack: "Go back a track"
-        case .volumeUp: "Turn the sound up one step"
-        case .volumeDown: "Turn the sound down one step"
-        case .mute: "Mute or unmute the sound"
-        case .openApp: "Launch an app, or bring it to the front"
-        case .runShortcut: "Run one of your Shortcuts"
-        case .privacyGuard: "Mute, camera off and blur the screen"
+        case .none: String(localized: "This zone does nothing")
+        case .desktopLeft: String(localized: "Switch to the Space on the left")
+        case .desktopRight: String(localized: "Switch to the Space on the right")
+        case .newNote: String(localized: "Open Notes with a fresh note")
+        case .playPause: String(localized: "Play or pause whatever is playing")
+        case .nextTrack: String(localized: "Skip to the next track")
+        case .previousTrack: String(localized: "Go back a track")
+        case .volumeUp: String(localized: "Turn the sound up one step")
+        case .volumeDown: String(localized: "Turn the sound down one step")
+        case .mute: String(localized: "Mute or unmute the sound")
+        case .openApp: String(localized: "Launch an app, or bring it to the front")
+        case .runShortcut: String(localized: "Run one of your Shortcuts")
+        case .privacyGuard: String(localized: "Mute, camera off and blur the screen")
         }
     }
 
@@ -76,12 +76,12 @@ enum ActionKind: String, Codable, CaseIterable, Identifiable {
     /// Short group used to organise the action picker.
     var group: String {
         switch self {
-        case .none: "None"
-        case .desktopLeft, .desktopRight: "Desktop"
-        case .playPause, .nextTrack, .previousTrack: "Music"
-        case .volumeUp, .volumeDown, .mute: "Sound"
-        case .newNote, .openApp, .runShortcut: "Apps"
-        case .privacyGuard: "Privacy"
+        case .none: String(localized: "None")
+        case .desktopLeft, .desktopRight: String(localized: "Desktop")
+        case .playPause, .nextTrack, .previousTrack: String(localized: "Music")
+        case .volumeUp, .volumeDown, .mute: String(localized: "Sound")
+        case .newNote, .openApp, .runShortcut: String(localized: "Apps")
+        case .privacyGuard: String(localized: "Privacy")
         }
     }
 

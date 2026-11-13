@@ -7,9 +7,9 @@ enum ModelKind: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .logreg: "Logistic regression"
-        case .knn: "Nearest neighbours"
-        case .centroid: "Nearest centroid"
+        case .logreg: String(localized: "Logistic regression")
+        case .knn: String(localized: "Nearest neighbours")
+        case .centroid: String(localized: "Nearest centroid")
         }
     }
 }

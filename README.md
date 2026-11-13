@@ -39,7 +39,10 @@ The default 2×2 layout: top-left **Desktop Left**, top-right **Desktop Right**,
 **Play / Pause**, bottom-right **Privacy Guard**.
 
 LidTap ignores the bumps that aren't taps: typing, clicking, scrolling, moving the pointer, moving the
-lid, and knocks on the desk.
+lid, and knocks on the desk. Typing, clicking and scrolling are known from the keyboard and trackpad
+themselves; the rest it tells apart by feel. To get better at that, it keeps up to 60 keystrokes and clicks
+the sensor felt as "not a tap" examples (the motion only, on this Mac; switch it off in Settings → Training).
+If things moved on the desk still set it off, lower **Ignore unfamiliar taps** there.
 
 ## Profiles: desk, lap, sofa
 
@@ -60,8 +63,8 @@ the menu is open. Privacy Guard, feedback, sounds and update settings are shared
    opens like any other app.
 3. A hand icon appears in the menu bar, and Settings opens.
 4. Allow **Accessibility** when asked (System Settings → Privacy & Security → Accessibility). Desktop
-   switching and music keys need it. **Input Monitoring** is optional: it lets LidTap tell typing from
-   tapping more precisely.
+   switching and music keys need it. **Input Monitoring** is optional: typing and clicking are
+   filtered out without it.
 5. Click **Calibrate**. Tap the dot in each highlighted zone a few times (about two minutes), then let it
    record 20 seconds of everyday bumps: typing, clicking, nudging the laptop. That's it.
 

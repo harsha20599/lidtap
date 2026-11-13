@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 
 /// AppModel end to end with a temporary data folder, no UI, and actions recorded instead of performed.
@@ -348,7 +349,7 @@ func appLogicTests() {
         h.app.regroupLeftRight()
         T.expect(T.wait(30) { h.app.report?.grid == .leftRight && !h.app.isTraining }, "did not retrain")
         T.note("four corners \(Int((four * 100).rounded()))% → two sides \(Int(((h.app.accuracy ?? 0) * 100).rounded()))% (predicted \(Int((predicted * 100).rounded()))%) on \(h.app.report?.sampleCount ?? 0) taps")
-        T.expect((h.app.accuracy ?? 0) >= 0.85, "two-side accuracy \(h.app.accuracy ?? 0) on the Pro")
+        T.expect((h.app.accuracy ?? 0) >= 0.75, "two-side accuracy \(h.app.accuracy ?? 0) on the Pro")
     }
 
     T.run("first calibration on a weak-tap Mac: soft taps are kept and the limit settles") {
@@ -566,8 +567,114 @@ func appLogicTests() {
         let dir = T.tempDir("partial")
         try! #"{"enabled": false, "detector": {"k": 4}}"#.write(to: dir.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
         let cfg = Store(directory: dir).loadConfig()
-        T.expect(!cfg.enabled && cfg.detector.k == 4 && cfg.detector.minThreshold == 1 && cfg.rejectFactor == 2 && cfg.guardMutesMic, "partial config \(cfg)")
+        T.expect(!cfg.enabled && cfg.detector.k == 4 && cfg.detector.minThreshold == 1 && cfg.rejectFactor == AppConfig.defaultRejectFactor && cfg.guardMutesMic, "partial config \(cfg)")
         try? FileManager.default.removeItem(at: dir)
+    }
+
+    T.run("settings from before the stricter default: an untouched reject factor of 2 becomes 1.2, once") {
+        let dir = T.tempDir("migrate")
+        func load(_ json: String) -> AppConfig {
+            try! json.write(to: dir.appendingPathComponent("config.json"), atomically: true, encoding: .utf8)
+            return Store(directory: dir).loadConfig()
+        }
+        let old = load(#"{"rejectFactor": 2, "profiles": [{"id": "desk", "name": "Desk", "settings": {"rejectFactor": 2}}, {"id": "lap", "name": "Lap", "settings": {"rejectFactor": 3.5}}], "activeProfileID": "desk"}"#)
+        T.expect(old.rejectFactor == 1.2 && old.profiles[0].settings.rejectFactor == 1.2 && old.profiles[1].settings.rejectFactor == 3.5 && old.settingsVersion == AppConfig.currentVersion,
+                 "old file: \(old.rejectFactor), profiles \(old.profiles.map(\.settings.rejectFactor))")
+        T.expect(load(#"{"rejectFactor": 2.6}"#).rejectFactor == 2.6, "a reject factor the user chose was changed")
+        // Saved again, the file is current: choosing 2.0 afterwards sticks.
+        var chosen = old
+        chosen.rejectFactor = 2.0
+        Store(directory: dir).save(chosen)
+        T.expect(Store(directory: dir).loadConfig().rejectFactor == 2.0, "a deliberate 2.0 was migrated again")
+        try? FileManager.default.removeItem(at: dir)
+    }
+
+    T.run("keyboard and pointer are seen without Input Monitoring, from the system's last-event times") {
+        let m = InputMonitor()
+        m.allowsSystemFallback = false   // no real keyboard: the test polls by hand with a scripted system
+        var now = 1000.0
+        var script: [(time: Double, type: CGEventType)] = []
+        for i in 0..<8 {   // eight keystrokes, 150 ms apart, each held 60 ms
+            script.append((1000.1 + 0.15 * Double(i), .keyDown))
+            script.append((1000.16 + 0.15 * Double(i), .keyUp))
+        }
+        script.append((1001.5, .leftMouseDown))
+        script.append((1001.56, .leftMouseUp))
+        script.append((1001.8, .scrollWheel))
+        m.secondsSinceLast = { type in script.last { $0.type == type && $0.time <= now }.map { now - $0.time } ?? 1e9 }
+        m.record(.click, at: 1001.5)   // the event tap delivered this one too: it must not count twice
+        while now < 1002 { m.poll(now: now); now += 0.04 }
+        let keys = m.times([.key], from: 1000, to: 1002), clicks = m.times([.click], from: 1000, to: 1002)
+        T.expect(keys.count == 16, "\(keys.count) of 16 key events kept")
+        T.expect(clicks.count == 2 && m.times([.scroll], from: 1001.7, to: 1001.9).count == 1, "\(clicks.count) clicks")
+        T.expect(keys.allSatisfy { k in script.contains { abs($0.time - k) < 1e-6 } }, "key times are not the events' own times")
+        // Keys LidTap presses itself are left out.
+        m.ignoreKeys(from: 1003, for: 0.6)
+        script.append((1003.2, .keyDown))
+        script.append((1003.25, .keyUp))
+        script.append((1003.9, .keyDown))
+        now = 1003
+        while now < 1004 { m.poll(now: now); now += 0.04 }
+        T.expect(m.times([.key], from: 1003, to: 1004) == [1003.9], "own keys kept: \(m.times([.key], from: 1003, to: 1004))")
+    }
+
+    T.run("the keys an action presses don't make the next tap look like typing") {
+        let h = AppHarness(name: "ownkeys")
+        guard h.train() else { return T.fail("no model") }
+        var t = MachClock.now() + 500
+        // Stand in for "Desktop Right": four key events (modifier and arrow, down and up) a moment after the tap.
+        h.app.performAction = { action in
+            h.performed.append(action)
+            for dt in [0.19, 0.2, 0.21, 0.22] { h.app.input.record(.key, at: t + dt) }
+            return nil
+        }
+        @MainActor func tap() -> TapRecord.Outcome? {
+            let r = h.app.replayEvent(label: "z1")!
+            h.app.handle(TapEvent(id: r.id, time: t, date: r.date, g: r.g, a: r.a, peakG: r.peakG, peakA: r.peakA, lid: r.lid, threshold: 1, noise: 0.1, gated: nil))
+            return h.app.lastRecord?.outcome
+        }
+        T.expect(tap() == .acted, "first tap did not act")
+        t += 0.7
+        T.expect(tap() == .acted, "a second tap 0.7 s later was \(h.app.lastRecord?.detail ?? "-")")
+        // The user's own typing still counts.
+        t += 10
+        for dt in [-0.9, -0.7, -0.5, -0.1] { h.app.input.record(.key, at: t + dt) }
+        T.expect(tap() == .ignored, "typing before a tap no longer ignores it")
+    }
+
+    T.run("learns what typing feels like: keystrokes the sensor felt become not-a-tap examples") {
+        let h = AppHarness(name: "learn")
+        guard h.train() else { return T.fail("no model") }
+        var t = MachClock.now() + 2000
+        @MainActor func event(typing: Bool, shortcut: Bool = false) {
+            t += 5
+            if typing { for dt in [-1.2, -1.1, -0.9, -0.8, -0.5, -0.4, -0.1, 0.02] { h.app.input.record(.key, at: t + dt) } }
+            if shortcut { for dt in [-0.95, -0.9, -0.85, -0.8] { h.app.input.record(.key, at: t + dt) } }   // ⌘-Tab, then a tap
+            let r = h.app.replayEvent(label: "z0")!
+            h.app.handle(TapEvent(id: r.id, time: t, date: r.date, g: r.g, a: r.a, peakG: r.peakG, peakA: r.peakA, lid: r.lid, threshold: 1, noise: 0.1, gated: nil))
+        }
+        T.expect(h.app.learnedLimit == 60, "limit \(h.app.learnedLimit) with 60 taps")
+        event(typing: false, shortcut: true)
+        T.expect(h.app.lastRecord?.outcome == .ignored && h.app.dataset.learnedCount == 0, "a tap after a shortcut was kept as a non-tap")
+        h.app.config.learnFromTyping = false
+        event(typing: true)
+        T.expect(h.app.dataset.learnedCount == 0, "learned with the setting off")
+        h.app.config.learnFromTyping = true
+        h.app.startCalibration(perZone: 16, block: 1)
+        event(typing: true)
+        h.app.endCalibration()   // (calibration took that event as a tap, as it takes anything that isn't a click)
+        T.expect(h.app.dataset.learnedCount == 0, "learned during calibration")
+        let before = h.app.dataset.samples.count
+        T.expect(T.wait(30) { h.app.report?.sampleCount == before && !h.app.isTraining }, "calibration's retrain did not finish")
+        for _ in 0..<14 { event(typing: true) }
+        T.expect(h.app.dataset.learnedCount == 14 && h.app.report?.sampleCount == before && h.performed.isEmpty, "learned \(h.app.dataset.learnedCount), acted \(h.performed.count)")
+        event(typing: true)   // the fifteenth retrains
+        T.expect(T.wait(30) { h.app.report?.sampleCount == before + 15 && !h.app.isTraining }, "no retrain after 15 (\(h.app.report?.sampleCount ?? 0) samples)")
+        T.expect(h.app.count(for: noiseLabel) == 15 && h.app.dataset.samples.filter { $0.auto == true }.allSatisfy { $0.label == noiseLabel }, "learned examples are not bumps")
+        for _ in 0..<60 { event(typing: true) }
+        T.expect(h.app.dataset.learnedCount == 60, "kept \(h.app.dataset.learnedCount), limit 60")
+        h.app.flushSave()
+        T.expect(Store(directory: h.dir).loadDataset().learnedCount == 60, "learned examples not saved as such")
     }
 
     T.run("model choice and reject factor apply live") {

@@ -10,9 +10,11 @@ struct TapSample: Codable, Identifiable {
     var peakA: Double
     var g: [[Double]]
     var a: [[Double]]
+    /// A "not a tap" example LidTap picked up by itself (a keystroke or click it felt), not one from calibration.
+    var auto: Bool? = nil
 
     enum CodingKeys: String, CodingKey {
-        case id, label, wall, lid, g, a
+        case id, label, wall, lid, g, a, auto
         case peakG = "peak_g", peakA = "peak_a"
     }
 }
@@ -22,13 +24,22 @@ struct Dataset: Codable {
     var samples: [TapSample] = []
 
     func count(_ label: String) -> Int { samples.reduce(0) { $0 + ($1.label == label ? 1 : 0) } }
+    var learnedCount: Int { samples.reduce(0) { $0 + ($1.auto == true ? 1 : 0) } }
     var zoneTapCount: Int { samples.filter { $0.label != noiseLabel }.count }
 }
 
 struct AppConfig: Codable, Equatable {
+    /// "Ignore unfamiliar taps": a tap farther than this many times the usual spacing from every tap of its
+    /// zone is not acted on. It was 2.0. On a 14" MacBook Pro, of 22 bumps that were not keystrokes (things moved
+    /// on the desk, hands settling, a lap) 4 were read as taps at 2.0 and 1 at 1.2, with the same real taps kept.
+    static let defaultRejectFactor = 1.2
+    /// Settings written before version 2 carry the old reject factor default.
+    static let currentVersion = 2
+
+    var settingsVersion = AppConfig.currentVersion
     var enabled = true
     var detector = DetectorSettings()
-    var rejectFactor = 2.0
+    var rejectFactor = AppConfig.defaultRejectFactor
     /// Act only when the recogniser is at least this sure; otherwise say "not sure" instead of doing the wrong thing.
     var minConfidence = 0.6
     /// Learn the weakest usable tap from this Mac's own taps (see `TapStrength`) instead of `minTapStrength`.
@@ -43,6 +54,8 @@ struct AppConfig: Codable, Equatable {
     var guardStopsCamera = true
     /// Ask GitHub about once a day whether a newer LidTap is out (installing always needs the user's OK).
     var checkForUpdates = true
+    /// Keep a few dozen keystrokes and clicks the sensor felt as "not a tap" examples (see `AppModel.learnNonTap`).
+    var learnFromTyping = true
     /// Places with their own calibration, sensitivity and zone actions (empty until the user adds one).
     var profiles: [Profile] = []
     var activeProfileID = Profile.defaultID
@@ -64,6 +77,7 @@ struct AppConfig: Codable, Equatable {
         guardMutesMic = try c.decodeIfPresent(Bool.self, forKey: .guardMutesMic) ?? d.guardMutesMic
         guardStopsCamera = try c.decodeIfPresent(Bool.self, forKey: .guardStopsCamera) ?? d.guardStopsCamera
         checkForUpdates = try c.decodeIfPresent(Bool.self, forKey: .checkForUpdates) ?? d.checkForUpdates
+        learnFromTyping = try c.decodeIfPresent(Bool.self, forKey: .learnFromTyping) ?? d.learnFromTyping
         profiles = try c.decodeIfPresent([Profile].self, forKey: .profiles) ?? d.profiles
         var seen = Set<String>()
         profiles = profiles.filter { Profile.isValidID($0.id) && seen.insert($0.id).inserted }
@@ -71,6 +85,14 @@ struct AppConfig: Codable, Equatable {
         // A hand-edited or half-written file can't leave LidTap on a profile that doesn't exist.
         if !profiles.isEmpty && !profiles.contains(where: { $0.id == activeProfileID }) { activeProfileID = profiles[0].id }
         if !Profile.isValidID(activeProfileID) { activeProfileID = Profile.defaultID }
+        // A file from before the stricter default still holds 2.0 unless the user moved the slider: bring an
+        // untouched 2.0 down once, here and in each profile.
+        settingsVersion = try c.decodeIfPresent(Int.self, forKey: .settingsVersion) ?? 1
+        if settingsVersion < 2 {
+            if rejectFactor == 2.0 { rejectFactor = AppConfig.defaultRejectFactor }
+            for i in profiles.indices where profiles[i].settings.rejectFactor == 2.0 { profiles[i].settings.rejectFactor = AppConfig.defaultRejectFactor }
+            settingsVersion = AppConfig.currentVersion
+        }
     }
 }
 

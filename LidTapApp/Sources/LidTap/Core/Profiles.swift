@@ -5,7 +5,7 @@ import Foundation
 /// Everything else in `AppConfig` (on/off, feedback, Privacy Guard, updates) is shared.
 struct ProfileSettings: Codable, Equatable {
     var detector = DetectorSettings()
-    var rejectFactor = 2.0
+    var rejectFactor = AppConfig.defaultRejectFactor
     var minConfidence = 0.6
     var autoTapStrength = true
     var minTapStrength = 3.5

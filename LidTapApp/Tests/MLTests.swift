@@ -87,6 +87,33 @@ func mlTests() {
         T.expect(r.confusion?.flatMap { $0 }.reduce(0, +) == 60 && !r.labels.contains(noiseLabel), "the lone bump was scored")
     }
 
+    T.run("accuracy counts taps only: easy not-a-tap examples can't lift it") {
+        var Xn = X, Ln = labels
+        for seed in 0..<40 {   // forty bumps nothing like a tap
+            var rng = SplitMix64(seed: UInt64(seed + 300))
+            let g = (0..<TapDetector.n).map { i in (0..<3).map { _ in Double.random(in: -1...1, using: &rng) * (i > 24 ? 4 : 0.2) } }
+            Xn.append(Features.extract(g: g, a: g.map { $0.map { $0 / 300 } }))
+            Ln.append(noiseLabel)
+        }
+        let r = Evaluator.evaluate(X: Xn, labels: Ln, grid: ds.grid)
+        guard let cm = r.confusion, let acc = r.accuracy(r.best) else { return T.fail("no scores") }
+        let zones = r.labels.indices.filter { r.labels[$0] != noiseLabel }
+        let right = zones.reduce(0) { $0 + cm[$1][$1] }, all = zones.reduce(0) { $0 + cm[$1].reduce(0, +) }
+        T.note("taps in the right zone \(right)/\(all); all rows including bumps \(cm.indices.reduce(0) { $0 + cm[$1][$1] })/100")
+        T.expect(all == 60 && abs(acc - Double(right) / Double(all)) < 1e-9, "accuracy \(acc) is not the taps' own \(right)/\(all)")
+    }
+
+    T.run("logistic regression is used unless another recogniser is far better") {
+        func pick(_ lr: Double, _ knn: Double, _ centroid: Double) -> ModelKind {
+            Evaluator.preferred([ModelScore(kind: .logreg, accuracy: [Layouts.full: lr]), ModelScore(kind: .knn, accuracy: [Layouts.full: knn]),
+                                 ModelScore(kind: .centroid, accuracy: [Layouts.full: centroid])])
+        }
+        T.expect(pick(0.77, 0.88, 0.58) == .logreg, "nearest neighbours' same-sitting lead of 11 points was trusted")
+        T.expect(pick(0.95, 0.93, 0.93) == .logreg && pick(0.90, 0.90, 0.95) == .logreg, "a small lead was trusted")
+        T.expect(pick(0.60, 0.80, 0.70) == .knn && pick(0.50, 0.70, 0.90) == .centroid, "a far better recogniser was passed over")
+        T.expect(Evaluator.preferred([]) == .logreg, "no scores")
+    }
+
     T.run("layout mappings for 2×2, 2×3 and 3×3") {
         let g33 = Layouts.all(for: Grid(rows: 3, cols: 3))
         T.expect(g33.map(\.0) == ["Full grid", "Columns", "Left / right", "Rows", "Top / bottom", "Corners"], "3×3 layouts \(g33.map(\.0))")

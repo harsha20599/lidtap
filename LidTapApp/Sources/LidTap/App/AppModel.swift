@@ -227,7 +227,7 @@ final class AppModel {
             "accessibility": status.accessibility, "enabled": config.enabled, "trained": isTrained,
             "model": modelName, "accuracy": acc, "grid": grid.title,
             "samples": dataset.samples.count, "guardActive": privacyGuard.isActive,
-            "calibrating": calibration != nil, "taps": recent.count,
+            "calibrating": calibration != nil, "taps": recent.count, "learned": dataset.learnedCount, "seesKeys": input.seesKeys,
             "profile": config.activeProfile?.name ?? "", "profiles": config.profiles.count,
         ]
         info["recent"] = recent.prefix(10).map { ["id": $0.id, "outcome": "\($0.outcome)", "label": $0.label ?? "", "detail": $0.detail,
@@ -309,6 +309,7 @@ final class AppModel {
         // recogniser learns what they feel like and learns to reject them.
         if !noiseRecording, let (reason, detail) = inputGate(event) {
             record(.ignored, nil, nil, "Ignored: \(reason)", gateDetail: detail)
+            learnNonTap(event, strength: strength)
             // Motion with no jolt in it wasn't an attempt at a tap (a nudge, a lap shifting): nothing to tell the user.
             if calibration?.phase == .taps, reason != TapDetector.notATap { flash(.ignored(reason)) }
             return
@@ -379,6 +380,8 @@ final class AppModel {
             if presentsUI && config.showTapFeedback { TapFeedback.shared.show(zone: nil, grid: grid, action: nil) }
             return
         }
+        // The action may press keys of its own (switching desktops does); they are not the user typing.
+        input.ignoreKeys(from: event.time, for: 0.6)
         let error = performAction(action)
         record(.acted, p.label, confidence, error ?? action.title)
         if let z = zoneIndex(p.label) { ripple = (z, (ripple?.id ?? 0) + 1) }
@@ -387,6 +390,35 @@ final class AppModel {
             TapFeedback.shared.show(zone: zoneIndex(p.label), grid: grid, action: action)
         }
         if presentsUI && config.playSounds && action.kind != .none && !action.kind.hasSystemFeedback && error == nil { NSSound(named: "Pop")?.play() }
+    }
+
+    /// Most "not a tap" examples LidTap keeps by itself (never fewer than 20 allowed, never more than 60, and no
+    /// more than there are taps, so they can't outweigh them).
+    var learnedLimit: Int { max(20, min(60, dataset.zoneTapCount)) }
+
+    /// Keeps a keystroke or click the sensor felt as a "not a tap" example, so the recogniser learns what the
+    /// Mac feels like in daily use, not only in the 20 seconds of the calibration's bump step.
+    ///
+    /// Only an event that was certainly not a tap on the screen is kept: one with a key or click right on it
+    /// (80 ms before to 50 ms after the trigger), or one in the middle of typing (six key events in the 1.5 s
+    /// before, one of them within a quarter of a second). A shortcut pressed a moment before a tap is neither.
+    /// On a 14" MacBook Pro, 28 such examples cut the bumps read as taps (things moved on the desk, hands
+    /// settling, a lap) from 3 in 22 to 1 without losing a tap, since a keystroke shakes the base much as they do.
+    /// Retrains after every 15 kept, until `learnedLimit`.
+    private func learnNonTap(_ event: TapEvent, strength: Double) {
+        guard config.learnFromTyping, calibration == nil, model != nil, event.gated == nil, strength >= minTapStrength else { return }
+        let learned = dataset.learnedCount
+        guard learned < learnedLimit else { return }
+        let t0 = event.time
+        let onIt = !input.times([.key, .click], from: t0 - 0.08, to: t0 + 0.05).isEmpty
+        let midTyping = input.times([.key], from: t0 - 1.5, to: t0).count >= 6 && !input.times([.key], from: t0 - 0.25, to: t0 + 0.15).isEmpty
+        guard onIt || midTyping else { return }
+        let id = addSample(event, label: noiseLabel)
+        if let i = dataset.samples.firstIndex(where: { $0.id == id }) { dataset.samples[i].auto = true }
+        if (learned + 1) % 15 == 0 || learned + 1 == learnedLimit {
+            Log.app.notice("Learned \(learned + 1) keystrokes and clicks as not-a-tap examples; retraining")
+            scheduleRetrain()
+        }
     }
 
     /// Should input around this tap disqualify it? Typing and clicking shake the laptop like a tap, and macOS

@@ -27,7 +27,7 @@ anywhere to undo it all, including turning the camera back on.
 ## Permissions
 
 - **Accessibility**: required for desktop switching, media keys, New Note and meeting camera control.
-- **Input Monitoring**: some Macs need it before the motion sensor streams.
+- **Input Monitoring**: some Macs need it before the motion sensor streams. Typing and clicks are filtered out with or without it.
 - **Automation**: asked the first time Privacy Guard looks for a Google Meet tab.
 
 The build is ad-hoc signed, so after each rebuild macOS may need Accessibility switched off and on again.

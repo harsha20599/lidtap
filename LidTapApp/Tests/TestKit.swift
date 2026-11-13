@@ -128,6 +128,9 @@ struct RawStream {
     var gyro: [SIMD3<Double>]   // deg/s
     var accel: [SIMD3<Double>]  // g
     var segments: [(name: String, start: Double, end: Double)]
+    /// Keyboard and pointer events during the recording (optional `"inputs": [{"kind", "time"}]` in the .json;
+    /// kinds are InputMonitor.Kind raw values, times in seconds like the segments).
+    var inputs: [(kind: String, time: Double)] = []
 
     func segment(_ name: String) -> (start: Double, end: Double) {
         let s = segments.first { $0.name == name }!
@@ -160,7 +163,8 @@ extension T {
         let segments = (meta["segments"] as! [[String: Any]]).map {
             (name: $0["name"] as! String, start: ($0["start"] as! NSNumber).doubleValue, end: ($0["end"] as! NSNumber).doubleValue)
         }
-        return RawStream(rate: (meta["rate"] as! NSNumber).doubleValue, gyro: gyro, accel: accel, segments: segments)
+        let inputs = (meta["inputs"] as? [[String: Any]] ?? []).map { (kind: $0["kind"] as! String, time: ($0["time"] as! NSNumber).doubleValue) }
+        return RawStream(rate: (meta["rate"] as! NSNumber).doubleValue, gyro: gyro, accel: accel, segments: segments, inputs: inputs.sorted { $0.time < $1.time })
     }
 }
 

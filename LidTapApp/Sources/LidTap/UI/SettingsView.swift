@@ -338,6 +338,12 @@ private struct TrainingPane: View {
                     Text("Ignore unfamiliar taps")
                     Text("Lower is stricter: fewer wrong actions, more \"tap again\".")
                 }
+                Toggle(isOn: $app.config.learnFromTyping) {
+                    Text("Learn what typing feels like")
+                    Text(app.dataset.learnedCount == 0
+                         ? "Keeps up to \(app.learnedLimit) keystrokes and clicks the sensor feels as \"not a tap\" examples, so bumps and typing are told from taps. Motion only, kept on this Mac."
+                         : "\(app.dataset.learnedCount) of up to \(app.learnedLimit) keystrokes and clicks kept as \"not a tap\" examples. Motion only, kept on this Mac.")
+                }
             } header: {
                 Text("Recognition")
             } footer: {

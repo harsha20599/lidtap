@@ -210,6 +210,22 @@ enum Evaluator {
         return out
     }
 
+    /// Another recogniser has to beat logistic regression by this much to be used instead.
+    static let margin = 0.15
+
+    /// The recogniser to use. Cross-validation scores taps against others from the same sitting, which flatters
+    /// nearest neighbours: calibration taps come five in a row, and it remembers a sitting. On a 14" MacBook Pro
+    /// it scored 88% that way against logistic regression's 77%, then read 22 of 53 taps from another sitting
+    /// as the wrong zone against 12. So logistic regression, which draws one smooth boundary, is used unless
+    /// another is far better: the sign that a straight boundary can't separate these zones at all (ties among
+    /// the rest go to the earlier kind).
+    static func preferred(_ scores: [ModelScore]) -> ModelKind {
+        let full = { (s: ModelScore) in s.accuracy[Layouts.full] ?? -1 }
+        guard let top = scores.max(by: { full($0) < full($1) }) else { return .logreg }
+        guard let logreg = scores.first(where: { $0.kind == .logreg }) else { return top.kind }
+        return full(top) - full(logreg) >= margin ? top.kind : .logreg
+    }
+
     /// Cross-validated scores per model and layout. Augmented variants are only ever added to training folds.
     static func evaluate(X: [[Double]], labels allLabels: [String], grid: Grid, augmented allAugmented: [[[Double]]]? = nil) -> ModelReport {
         // A label with a single sample can't be both learned from and checked (one stray bump in the "not a tap"
@@ -229,14 +245,16 @@ enum Evaluator {
                 let keep = labels.indices.filter { map(labels[$0]) != nil }
                 let mapped = keep.map { map(labels[$0])! }
                 if let p = crossValidate(kind, X: keep.map { X[$0] }, labels: mapped, augmented: augmented.map { aug in keep.map { aug[$0] } }) {
-                    acc[name] = Double(zip(p, mapped).filter { $0 == $1 }.count) / Double(mapped.count)
+                    // Scored on taps alone. "Not a tap" examples are in every fold and can win a tap, but being
+                    // easy to spot themselves they must not lift the figure the user reads as "taps in the right zone".
+                    let taps = mapped.indices.filter { mapped[$0] != noiseLabel }
+                    acc[name] = taps.isEmpty ? 0 : Double(taps.filter { p[$0] == mapped[$0] }.count) / Double(taps.count)
                     if name == Layouts.full { fullPreds[kind] = p }
                 }
             }
             scores.append(ModelScore(kind: kind, accuracy: acc))
         }
-        // Ties go to the earlier kind in ModelKind.allCases (logistic regression first).
-        let best = scores.max { ($0.accuracy[Layouts.full] ?? -1) < ($1.accuracy[Layouts.full] ?? -1) }?.kind ?? .logreg
+        let best = preferred(scores)
         let ordered = Array(Set(labels)).sorted { a, b in
             if (a == noiseLabel) != (b == noiseLabel) { return b == noiseLabel }
             return (zoneIndex(a) ?? 0) < (zoneIndex(b) ?? 0)
